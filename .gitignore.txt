@@ -1,0 +1,13 @@
+data/raw/
+data/processed/
+reports/
+archive/
+__pycache__/
+*.pyc
+.vscode/
+*.log
+blah.py
+check*.py
+hallo.txt
+development_diary.txt
+tested varaibles list.txt

@@ -1,0 +1,132 @@
+Loaded 20 annual observations.
+Range: 2007-04-01 to 2026-01-01
+
+Candidates (6): ['PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none', "ALT: trend flip -> 'c'", 'ALT: AR(1) only (1,1,0)', 'ALT: MA(1) only (0,1,1)', 'ALT: ARMA(1,1) (1,1,1)', 'BASELINE: white noise (0,1,0)']
+
+==========================================================================================
+DIAGNOSTIC SEQUENCE
+==========================================================================================
+
+--- [1/5] Significance screen (OLS, exog vs. level) ---
+  No exog columns configured for this metric - skipping.
+
+--- [2/5] Quadratic trend check ---
+  t^2 coef=0.133584  p=0.2095  [OK: no significant curvature]
+
+--- [3/5] Stationarity checks (ADF + KPSS) ---
+  level                ADF p=0.9936 [FLAG: non-stationary (ADF)]   KPSS p=0.0140 [FLAG: non-stationary (KPSS)]
+  1st diff             ADF p=0.0009 [stationary]   KPSS p=0.1000 [stationary]
+
+--- [4/5] Order selection (AICc grid search, suggestions only) ---
+  Fitted 0/18 grid combinations successfully.
+  No grid combination converged.
+
+--- [5/5] Instability check (AR/MA roots, full-history fit per candidate) ---
+  PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none          [OK]
+  ALT: trend flip -> 'c'                                  [OK]
+  ALT: AR(1) only (1,1,0)                                 [OK]
+  ALT: MA(1) only (0,1,1)                                 [OK]
+  ALT: ARMA(1,1) (1,1,1)                                  [OK]
+  BASELINE: white noise (0,1,0)                           [OK]
+
+Horizons tested: [1, 2, 3, 4, 5, 8, 10] | Min training window: 6
+
+==========================================================================================
+BACKTEST RESULTS (rolling-origin, expanding window)
+==========================================================================================
+
+--- Horizon = 1 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none           13  15.8925   8.3894  -4.0053    0.50    0.92
+ALT: trend flip -> 'c'                                   13  17.0287  10.0503  -1.7381    0.67    0.77
+ALT: AR(1) only (1,1,0)                                  13  19.9713  11.0864  -0.4652    0.83    0.77
+ALT: MA(1) only (0,1,1)                                  13  19.0485  11.0697  -1.3062    0.83    0.77
+ALT: ARMA(1,1) (1,1,1)                                   13  26.1817  14.9797  +2.8825    0.58    0.69
+BASELINE: white noise (0,1,0)                            13  16.6109   9.1692  -5.2769    0.08    0.85
+
+--- Horizon = 2 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none           12  24.7351  16.7677  -8.4562    0.58    0.83
+ALT: trend flip -> 'c'                                   12  26.0911  17.2770  -4.1729    0.75    0.67
+ALT: AR(1) only (1,1,0)                                  12  38.5170  23.5522  -1.5371    0.67    0.75
+ALT: MA(1) only (0,1,1)                                  12  29.7984  20.7324  -6.1853    0.83    0.75
+ALT: ARMA(1,1) (1,1,1)                                   12  49.8977  28.0176  +4.1423    0.83    0.75
+BASELINE: white noise (0,1,0)                            12  26.3367  18.8000 -11.1167    0.08    0.75
+
+--- Horizon = 3 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none           11  29.6737  22.5324 -12.6835    0.64    0.73
+ALT: trend flip -> 'c'                                   11  28.4535  18.9901  -6.7117    0.82    0.64
+ALT: AR(1) only (1,1,0)                                  11  50.8385  31.8483  -2.2794    0.64    0.64
+ALT: MA(1) only (0,1,1)                                  11  34.1277  25.9007 -10.1169    0.64    0.73
+ALT: ARMA(1,1) (1,1,1)                                   11  65.2766  37.3115  +4.8546    0.73    0.64
+BASELINE: white noise (0,1,0)                            11  31.1705  23.6727 -16.6545    0.09    0.64
+
+--- Horizon = 4 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none           10  33.5883  28.1018 -17.5930    0.60    0.50
+ALT: trend flip -> 'c'                                   10  28.5789  21.0951 -10.3519    0.80    0.70
+ALT: AR(1) only (1,1,0)                                  10  56.8655  38.3722  -4.2448    0.70    0.60
+ALT: MA(1) only (0,1,1)                                  10  36.9223  30.1253 -13.5546    0.70    0.70
+ALT: ARMA(1,1) (1,1,1)                                   10  74.2981  45.8129  +3.4805    0.70    0.60
+BASELINE: white noise (0,1,0)                            10  35.5825  28.7300 -23.1700    0.10    0.60
+
+--- Horizon = 5 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none            9  38.7518  34.4684 -28.4591    0.67    0.33
+ALT: trend flip -> 'c'                                    9  30.4454  24.4628 -16.8324    0.89    0.44
+ALT: AR(1) only (1,1,0)                                   9  66.0283  47.8275 -10.5791    0.78    0.44
+ALT: MA(1) only (0,1,1)                                   9  42.6126  37.4464 -22.0111    0.78    0.44
+ALT: ARMA(1,1) (1,1,1)                                    9  84.0314  54.3522  -3.3926    0.78    0.44
+BASELINE: white noise (0,1,0)                             9  41.7780  36.5222 -33.3000    0.11    0.33
+
+--- Horizon = 8 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none            6  60.3665  58.3209 -58.3209    0.67    0.00
+ALT: trend flip -> 'c'                                    6  39.7271  36.4452 -36.4452    1.00    0.00
+ALT: AR(1) only (1,1,0)                                   6  59.0983  56.1193 -56.1193    0.83    0.17
+ALT: MA(1) only (0,1,1)                                   6  59.2814  56.5235 -56.5235    0.83    0.00
+ALT: ARMA(1,1) (1,1,1)                                    6  58.4766  55.4871 -55.4871    0.83    0.33
+BASELINE: white noise (0,1,0)                             6  62.6133  60.9667 -60.9667    0.00    0.00
+
+--- Horizon = 10 year(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 1, 0)x(0, 0, 1, 4) n, exog=none            4  56.6770  56.5961 -56.5961    0.50    0.00
+ALT: trend flip -> 'c'                                    4  28.1327  27.9449 -27.9449    1.00    0.00
+ALT: AR(1) only (1,1,0)                                   4  55.0279  54.7801 -54.7801    0.75    0.25
+ALT: MA(1) only (0,1,1)                                   4  55.6380  55.4821 -55.4821    0.75    0.00
+ALT: ARMA(1,1) (1,1,1)                                    4  54.8241  54.6145 -54.6145    0.75    0.25
+BASELINE: white noise (0,1,0)                             4  58.0034  57.9250 -57.9250    0.00    0.00
+
+==========================================================================================
+RESIDUAL DIAGNOSTICS (production spec, full-history fit)
+==========================================================================================
+
+  Ljung-Box (H0: no autocorrelation left in residuals)
+    lag=2   stat=0.046  p=0.9771  [OK]
+    lag=4   stat=0.099  p=0.9988  [OK]
+    lag=6   stat=0.214  p=0.9998  [OK]
+
+  Jarque-Bera (H0: residuals normal): stat=134.733  p=0.0000  skew=3.379  kurtosis=13.771  [FLAG: residuals non-normal]
+
+  ARCH LM (H0: no heteroskedasticity), nlags=3: stat=0.201  p=0.9774  [OK]
+
+==========================================================================================
+COMPACT SUMMARY
+==========================================================================================
+n_obs: 20
+longest_horizon_tested: 10
+n_folds: 4
+rmse: 56.67698220785777
+mae: 56.59613272431582
+bias: -56.59613272431582
+dir_acc: 0.5
+ci_coverage: 0.0
+ljung_box: OK
+jarque_bera: FLAG
+arch_heteroskedasticity: OK
+residual_fit_status: OK
+
+Summary saved to: C:\Users\44782\Desktop\empirical project\reports\pesa_annual_diagnostics_summary_20260701_210336.csv
+Full log saved to: C:\Users\44782\Desktop\empirical project\reports\pesa_annual_diagnostics_log_20260701_210336.txt
+==========================================================================================

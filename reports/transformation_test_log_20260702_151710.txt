@@ -1,0 +1,106 @@
+
+==========================================================================================
+TEST 1: RTT waiting list - Log Transformation
+==========================================================================================
+
+--- Baseline (no transformation) ---
+    None | AICc:  -365.28 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 5.18 | Kurt: 40.00
+
+--- Log Transformation ---
+     Log | AICc:  -677.49 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 8.54 | Kurt: 73.93
+
+==========================================================================================
+TEST 2: RTT % within 18 weeks - Logit Transformation
+==========================================================================================
+
+--- Baseline (no transformation) ---
+    None | AICc:  -284.82 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 7.12 | Kurt: 59.27
+
+--- Logit Transformation ---
+   Logit | AICc:  -205.21 | LB: PASS | JB: FAIL | ARCH: PASS | Roots: PASS | Skew: 3.68 | Kurt: 31.34
+
+==========================================================================================
+TEST 3: A&E 12-hour breach flow - Log1p Transformation
+==========================================================================================
+
+  n_obs after FIT_START_OVERRIDES cutoff: 22
+  value range: 2510.0 -> 172831.0
+
+--- Baseline (no transformation, current production spec) ---
+    None | AICc:   -16.99 | LB: PASS | JB: PASS | ARCH: PASS | Roots: PASS | Skew: -0.95 | Kurt: 3.05
+
+--- Log1p Transformation (log(1+y), safe against near-zero counts) ---
+   Log1p | AICc:   -69.69 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 3.83 | Kurt: 17.06
+
+==========================================================================================
+TEST 4: A&E 12-hour breach flow - Order/Seasonal Differencing Comparison
+==========================================================================================
+
+  NOTE: future exog here is a simple forward-fill of the last observed row,
+  NOT the production last-step linear extrapolation used in master_forecast_engine.py.
+  Use this to compare specs against each other, not as production forecast numbers.
+
+--- Production (d=1,D=0): order=(0, 1, 0), seasonal=(1, 0, 0, 4), trend=None ---
+  AICc: 490.09
+  mean_fc range: [18681.6, 123393.8]
+  negative mean_fc points: 0/22
+  negative CI-lower points: 19/22
+
+--- d=0,D=0,trend=c: order=(1, 0, 0), seasonal=(0, 0, 0, 4), trend=c ---
+  AICc: 523.00
+  mean_fc range: [131942.9, 174784.7]
+  negative mean_fc points: 0/22
+  negative CI-lower points: 0/22
+
+--- d=0,D=1(seasonal): order=(0, 0, 0), seasonal=(0, 1, 0, 4), trend=None ---
+  AICc: 468.77
+  mean_fc range: [97962.0, 180420.1]
+  negative mean_fc points: 0/22
+  negative CI-lower points: 22/22
+
+--- d=1,D=0,no seasonal AR: order=(0, 1, 1), seasonal=(0, 0, 0, 4), trend=None ---
+  AICc: 497.80
+  mean_fc range: [55087.3, 55087.3]
+  negative mean_fc points: 0/22
+  negative CI-lower points: 22/22
+
+--- Test 4 comparison ---
+  Production (d=1,D=0)         | AICc:   490.09 | neg mean pts:  0/22 | neg CI-lower pts: 19/22 | mean_fc range: [18682, 123394]
+  d=0,D=0,trend=c              | AICc:   523.00 | neg mean pts:  0/22 | neg CI-lower pts:  0/22 | mean_fc range: [131943, 174785]
+  d=0,D=1(seasonal)            | AICc:   468.77 | neg mean pts:  0/22 | neg CI-lower pts: 22/22 | mean_fc range: [97962, 180420]
+  d=1,D=0,no seasonal AR       | AICc:   497.80 | neg mean pts:  0/22 | neg CI-lower pts: 22/22 | mean_fc range: [55087, 55087]
+
+==========================================================================================
+SUMMARY COMPARISON
+==========================================================================================
+
+RTT waiting list:
+    None | AICc:  -365.28 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 5.18 | Kurt: 40.00
+     Log | AICc:  -677.49 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 8.54 | Kurt: 73.93
+
+RTT % within 18 weeks:
+    None | AICc:  -284.82 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 7.12 | Kurt: 59.27
+   Logit | AICc:  -205.21 | LB: PASS | JB: FAIL | ARCH: PASS | Roots: PASS | Skew: 3.68 | Kurt: 31.34
+
+A&E 12-hour breach flow:
+    None | AICc:   -16.99 | LB: PASS | JB: PASS | ARCH: PASS | Roots: PASS | Skew: -0.95 | Kurt: 3.05
+   Log1p | AICc:   -69.69 | LB: PASS | JB: FAIL | ARCH: FAIL | Roots: PASS | Skew: 3.83 | Kurt: 17.06
+
+Summary saved to: C:\Users\44782\Desktop\empirical project\reports\transformation_test_summary_20260702_151710.csv
+Full log saved to: C:\Users\44782\Desktop\empirical project\reports\transformation_test_log_20260702_151710.txt
+
+==========================================================================================
+RECOMMENDATION
+==========================================================================================
+
+RTT waiting list: Best model is Log transformation (AICc: -677.49)
+  -> Consider applying Log transformation
+
+RTT % within 18 weeks: Best model is None transformation (AICc: -284.82)
+  -> Keep current model (no transformation)
+
+A&E 12-hour breach flow: Best model is Log1p transformation (AICc: -69.69)
+  -> Consider applying Log1p transformation
+
+==========================================================================================
+Run completed.

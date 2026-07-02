@@ -1,4 +1,0 @@
-metric,order,seasonal_order,aicc,exog_cols
-RTT waiting list (level),"(0, 1, 3)","(0, 0, 0, 4)",2028.3992194024322,"['covid_pulse', 'post_covid_regime']"
-A&E attendances (flow),"(0, 1, 0)","(0, 0, 0, 4)",1847.615858767246,['covid_pulse']
-Workforce FTE (level),"(0, 1, 0)","(0, 0, 0, 4)",1388.9036521084072,['post_covid_regime']

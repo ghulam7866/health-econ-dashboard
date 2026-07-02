@@ -2,6 +2,21 @@
 app.py
 ------
 Frontend Streamlit interactive dashboard application.
+
+This module provides the user interface for the Health Economics Forecasting Dashboard.
+It displays time series data with forecasts, confidence intervals, and NICE policy annotations.
+
+Usage:
+    streamlit run app.py
+
+Input:
+    data/processed/dashboard_forecasts.csv
+    data/processed/nice_clean.csv
+
+Output:
+    Interactive Streamlit dashboard in the browser
+
+Last updated: 2026-07-02
 """
 
 import streamlit as st
@@ -19,89 +34,102 @@ st.set_page_config(
     layout="wide"
 )
 
+
 def load_data():
+    """
+    Load forecast data and NICE reference table.
+
+    Returns
+    -------
+    tuple
+        (forecast_df, nice_df) where nice_df may be None if file not found
+
+    Raises
+    ------
+    FileNotFoundError
+        If the forecast file is not found
+    """
     if not FORECAST_PATH.exists():
         raise FileNotFoundError(f"Forecast file not found at: {FORECAST_PATH}")
 
     df = pd.read_csv(FORECAST_PATH)
     df["quarter"] = pd.to_datetime(df["quarter"])
-    
+
     nice_df = None
     if NICE_PATH.exists():
         nice_df = pd.read_csv(NICE_PATH)
         nice_df["date"] = pd.to_datetime(nice_df["date"])
-        
+
     return df, nice_df
 
+
 def main():
+    """Main entry point for the Streamlit dashboard."""
     st.title("Health Systems Econometric Forecasting Dashboard")
     st.markdown("---")
-    
+
     try:
         df, nice_df = load_data()
-        
+
         if df is None:
             st.error(f"Missing master forecast data asset at: {FORECAST_PATH}.")
             return
-            
+
         if df.empty:
             st.error("The forecast file is empty. Please run pipeline again.")
             return
 
         st.sidebar.header("Series Selection")
-        
+
         if "metric" not in df.columns:
             st.error(f"Critical error: 'metric' column missing. Found columns instead: {list(df.columns)}")
             return
-            
+
         unique_metrics = sorted(df["metric"].dropna().unique())
         selected_metric = st.sidebar.selectbox("Choose a system indicator to analyze:", unique_metrics)
-        
+
         show_ci = st.sidebar.checkbox("Display 95% Forecast Confidence Intervals", value=True)
         show_nice = st.sidebar.checkbox("Overlay NICE QALY Policy Threshold Shifts", value=True)
         zoom_forecast = st.sidebar.checkbox("Zoom Y-Axis to Forecast Range", value=False)
-        
-        # ============================================================
-        # ADD GP DATA LIMITATION MESSAGE HERE
-        # ============================================================
+
+        # Display warning for GP series with limited data
         if selected_metric.startswith("GP"):
             st.warning(
-                "**DATA LIMITATION**: GP appointments data is only available from October 2023. "
+                "Data Limitation: GP appointments data is only available from October 2023. "
                 "With only 11 quarterly observations, reliable forecasting is not possible. "
-                "Only historical data is shown. "
+                "Only historical data is shown. Forecasts will be added as more data becomes available."
             )
-        
+
         metric_df = df[df["metric"] == selected_metric].sort_values("quarter")
-        
+
         hist_df = metric_df[metric_df["type"] == "history"]
         fore_df = metric_df[metric_df["type"] == "forecast"]
-        
-        # Create the figure ONCE
+
         fig = go.Figure()
-        
-        # Always show historical data
+
+        # Add historical data
         if not hist_df.empty:
             fig.add_trace(go.Scatter(
                 x=hist_df["quarter"], y=hist_df["value"],
                 mode="lines+markers", name="Observed History",
                 line=dict(color="#1f77b4", width=2.5)
             ))
-        
-        # Only show forecast if there is forecast data AND it's not a GP series
-        # For GP series, we skip forecasts entirely
+
+        # Add forecast data if available
         if not fore_df.empty and not selected_metric.startswith("GP"):
             if not hist_df.empty:
                 last_hist = hist_df.iloc[-1:]
                 plot_fore = pd.concat([last_hist, fore_df], ignore_index=True)
             else:
                 plot_fore = fore_df
-                
+
             fig.add_trace(go.Scatter(
                 x=plot_fore["quarter"], y=plot_fore["value"],
                 mode="lines+markers", name="Forecast Horizon",
                 line=dict(color="#ff7f0e", width=2.5, dash="dash")
             ))
-            
+
+            # Add confidence intervals
             if show_ci and "ci_lower" in fore_df.columns and "ci_upper" in fore_df.columns:
                 if not hist_df.empty:
                     plot_fore_ci = pd.concat([last_hist, fore_df], ignore_index=True)
@@ -109,7 +137,7 @@ def main():
                     plot_fore_ci["ci_upper"] = plot_fore_ci["ci_upper"].fillna(plot_fore_ci["value"])
                 else:
                     plot_fore_ci = fore_df
-                
+
                 fig.add_trace(go.Scatter(
                     x=pd.concat([plot_fore_ci["quarter"], plot_fore_ci["quarter"].iloc[::-1]], ignore_index=True),
                     y=pd.concat([plot_fore_ci["ci_upper"], plot_fore_ci["ci_lower"].iloc[::-1]], ignore_index=True),
@@ -120,7 +148,7 @@ def main():
                     name="95% Confidence Interval"
                 ))
         elif selected_metric.startswith("GP") and not hist_df.empty:
-            # For GP series with no forecast, add an annotation
+            # Add annotation for GP series with no forecast
             last_date = hist_df["quarter"].iloc[-1]
             last_value = hist_df["value"].iloc[-1]
             fig.add_annotation(
@@ -135,10 +163,11 @@ def main():
                 arrowcolor="orange"
             )
 
+        # Add NICE policy annotations
         if show_nice and nice_df is not None and not metric_df.empty:
             min_date, max_date = metric_df["quarter"].min(), metric_df["quarter"].max()
             local_nice = nice_df[(nice_df["date"] >= min_date) & (nice_df["date"] <= max_date)]
-            
+
             for _, row in local_nice.iterrows():
                 fig.add_shape(
                     type="line", x0=row["date"], x1=row["date"], y0=0, y1=1,
@@ -150,8 +179,9 @@ def main():
                     font=dict(size=9, color="#d62728"), textangle=-45
                 )
 
+        # Configure y-axis
         yaxis_settings = {"title": "Metric Values", "fixedrange": False}
-        
+
         if zoom_forecast and not fore_df.empty and not selected_metric.startswith("GP"):
             range_values = [fore_df["value"]]
             if show_ci and "ci_lower" in fore_df.columns and "ci_upper" in fore_df.columns:
@@ -164,7 +194,8 @@ def main():
             yaxis_settings["autorange"] = False
         else:
             yaxis_settings["autorange"] = True
-        
+
+        # Update chart layout
         fig.update_layout(
             title=dict(text=f"System Tracking Matrix: {selected_metric}", font=dict(size=16)),
             xaxis_title="Timeline Horizon",
@@ -178,14 +209,14 @@ def main():
             margin=dict(t=80, b=40, l=40, r=40),
             height=550
         )
-        
+
         st.plotly_chart(fig, use_container_width=True)
-        
+
+        # Display summary metrics
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(label="Historical Base Entries", value=f"{len(hist_df)} Quarters")
         with col2:
-            # Show 0 for GP series forecasts
             if selected_metric.startswith("GP"):
                 st.metric(label="Projected Forecast Steps", value="0 (Data Limited)")
             else:
@@ -200,6 +231,7 @@ def main():
     except Exception as e:
         st.error("An execution error occurred within the dashboard rendering script:")
         st.code(traceback.format_exc())
+
 
 if __name__ == "__main__":
     main()

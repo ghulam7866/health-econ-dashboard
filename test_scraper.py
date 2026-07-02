@@ -1,8 +1,18 @@
 """
 test_scraper.py
----------------
+----------------
 Smoke test and automated ingestion layer for all health systems datasets.
-Enforces strict process exit codes to protect downstream pipelines from partial ingestion.
+
+This script downloads raw data from NHS, ONS, and HMT sources.
+It enforces strict process exit codes to protect downstream pipelines from partial ingestion.
+
+Usage:
+    python test_scraper.py
+
+Outputs:
+    Raw data files saved to data/raw/
+
+Last updated: 2026-07-02
 """
 
 import sys
@@ -70,18 +80,28 @@ DIRECT_URLS = [
     ),
 ]
 
+
 def step1_probe():
+    """
+    Probe network targets using HEAD requests to verify availability.
+
+    Returns
+    -------
+    dict
+        Results of the probe for each target
+    """
     print("\n-- STEP 1: HEAD Probe Network Targets --")
     results = {}
+
     for name, url, fname_override in DIRECT_URLS:
         fname = fname_override or Path(url.split("?")[0]).name
         dest = RAW_DIR / fname
-        
+
         if dest.exists() and dest.stat().st_size > 0:
             print(f"   [CACHED] {name} found locally. Network verification skipped.")
             results[name] = "CACHED"
             continue
-            
+
         try:
             r = requests.head(url, headers=HEADERS, timeout=10, allow_redirects=True)
             ok = r.status_code == 200
@@ -94,11 +114,27 @@ def step1_probe():
         except Exception as e:
             print(f"   [ERROR] {name} Probe Failed: {e}")
             results[name] = False
+
     return results
 
+
 def step2_download(probe_results):
+    """
+    Download assets that passed the probe.
+
+    Parameters
+    ----------
+    probe_results : dict
+        Results from step1_probe
+
+    Returns
+    -------
+    dict
+        Paths to downloaded files or None for failures
+    """
     print("\n-- STEP 2: Downstream Asset Sync --")
     downloaded = {}
+
     for name, url, fname_override in DIRECT_URLS:
         fname = fname_override or Path(url.split("?")[0]).name
         dest = RAW_DIR / fname
@@ -112,7 +148,7 @@ def step2_download(probe_results):
             print(f"   [SKIP] {name}: Synchronisation skipped due to bad network endpoint.")
             downloaded[name] = None
             continue
-            
+
         try:
             print(f"   [DOWNLOADING] Asset stream: {name}...")
             with requests.get(url, headers=HEADERS, stream=True, timeout=60) as r:
@@ -122,19 +158,23 @@ def step2_download(probe_results):
                     print(f"      [ERROR] Ingestion Error: Target returned HTML payload instead of structured file.")
                     downloaded[name] = None
                     continue
-                    
+
                 with open(dest, "wb") as f:
                     for chunk in r.iter_content(chunk_size=32768):
                         if chunk:
                             f.write(chunk)
+
             print(f"      [SUCCESS] Safe extraction complete: {dest.stat().st_size/1024:.0f} KB")
             downloaded[name] = dest
         except Exception as e:
             print(f"      [ERROR] Failed to write file: {e}")
             downloaded[name] = None
+
     return downloaded
 
+
 def main():
+    """Main entry point - runs the scraper and ingestion engine."""
     print("=" * 75)
     print(" HEALTH ECONOMICS SCRAPER & INGESTION INTEGRITY ENGINE")
     print("=" * 75)
@@ -148,6 +188,7 @@ def main():
     print(f"   Execution Integrity Ratio: {success}/{total} assets secured.")
 
     failed = [name for name, path in downloads.items() if not path]
+
     if failed:
         print(f"\n   [CRITICAL] INGESTION ERROR: {len(failed)} pipeline targets failed to load:")
         for name in failed:
@@ -155,10 +196,11 @@ def main():
         print("\n   [ACTION] Terminating workflow path execution sequence.")
         print("   NHS/Digital URL tokens change dynamically. Please update DIRECT_URLS mapping.")
         sys.exit(1)
-        
+
     print("\n   [SUCCESS] All upstream assets verified and matching local storage. Proceeding.")
     print("=" * 75)
     print()
+
 
 if __name__ == "__main__":
     main()

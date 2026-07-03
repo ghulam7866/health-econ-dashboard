@@ -25,6 +25,28 @@ This dashboard provides quarterly forecasts for key NHS metrics using SARIMAX mo
 | RTT % within 18 weeks | Random walk with drift | Smoothed transition |
 | A&E 12-hour breach | Random walk + quadratic_trend | Stable forecast |
 
+## Data Limitations
+
+The following metrics have data limitations that affect forecasting reliability:
+
+| Metric | Limitation | Impact |
+|--------|------------|--------|
+| **GP total appointments** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
+| **GP face-to-face** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
+| **GP telephone** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
+| **A&E 12-hour breach** | High volatility, short history (22 observations post-2021) | Wide confidence intervals - use with caution |
+
+### Notes on Specific Metrics
+
+#### A&E 12-hour Breach
+This metric was restricted to post-2021 data to improve model stability. The series is inherently volatile, and confidence intervals reflect this uncertainty. CI constraints are applied to keep bounds within historical ranges.
+
+#### RTT % within 18 weeks
+This is a percentage metric (0-1 scale) and is displayed as percentages in the dashboard. Confidence intervals are capped at 100% to ensure validity.
+
+#### GP Appointments
+All GP appointment series have insufficient data for reliable forecasting (only 11 quarters). Historical data is displayed, but no forecasts are generated. This is a data scope limitation.
+
 ## Installation
 
 ```bash
@@ -34,7 +56,6 @@ cd health-econ-dashboard
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
 ## Usage
 

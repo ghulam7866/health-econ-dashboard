@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+GP total appointments (flow),11,3,"PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=['quadratic_trend']",3,41113759.54044882,32064681.675022874,32064681.675022874,0.6666666666666666,0.6666666666666666,OK,OK,N/A,OK

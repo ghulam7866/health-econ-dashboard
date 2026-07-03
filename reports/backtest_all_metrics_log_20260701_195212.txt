@@ -1,0 +1,47 @@
+Run started: 2026-07-01T19:52:12.338641
+Input file: C:\Users\44782\Desktop\empirical project\data\processed\combined_quarterly.csv
+Metrics to process (10): ['RTT waiting list (level)', 'A&E attendances (flow)', 'Workforce FTE (level)', 'Bed occupancy (level)', 'PESA Health spend (level)', 'RTT % within 18 weeks (performance)', 'A&E 12-hour decisions to admit (breach flow)', 'GP total appointments (flow)', 'GP face-to-face appointments (flow)', 'GP telephone appointments (flow)']
+
+
+##########################################################################################
+# METRIC: RTT waiting list (level)
+# Series label: Incomplete RTT pathways - Total waiting (mil) with estimates for missing data
+##########################################################################################
+Loaded 76 observations.
+Range: 2007-07-01 to 2026-04-01
+Horizons tested: [1, 2, 3, 4, 8, 12] | Min training window: 6
+Candidates (6): ["PRODUCTION (0, 1, 1)x(1, 0, 1, 4) c, exog=['quadratic_trend']", "ALT: trend flip -> 'n'", "ALT: no exog (drop ['quadratic_trend'])", 'ALT: AR(1) only (1,1,0)', 'ALT: ARMA(1,1) (1,1,1)', 'BASELINE: white noise (0,1,0)']
+
+==========================================================================================
+DIAGNOSTIC SEQUENCE (screening report - nothing here is auto-applied)
+==========================================================================================
+
+--- [1/5] Significance screen (OLS, exog vs. level) ---
+  quadratic_trend           coef=   691832.4301  p=0.0009  [OK]
+
+--- [2/5] Quadratic trend check ---
+  t^2 coef=1375.309295  p=0.0000  [FLAG: significant curvature]
+
+--- [3/5] Stationarity checks (ADF + KPSS) ---
+  level                ADF p=0.8377 [FLAG: non-stationary (ADF)]   KPSS p=0.0100 [FLAG: non-stationary (KPSS)]
+  1st diff             ADF p=0.0068 [stationary]   KPSS p=0.0743 [stationary]
+  seasonal diff (4)    ADF p=0.1207 [FLAG: non-stationary (ADF)]   KPSS p=0.0918 [stationary]
+
+--- [4/5] Order selection (AICc grid search, suggestions only) ---
+  Fitted 144/144 grid combinations successfully.
+  AICc=   -371.49  order=(1, 1, 0)  seasonal_order=(1, 0, 1, 4)  trend=None
+  AICc=   -369.18  order=(0, 1, 1)  seasonal_order=(1, 0, 0, 4)  trend=None
+  AICc=   -368.76  order=(0, 1, 1)  seasonal_order=(0, 0, 1, 4)  trend=None
+  AICc=   -368.54  order=(1, 1, 0)  seasonal_order=(1, 0, 0, 4)  trend=None
+  AICc=   -368.44  order=(2, 1, 0)  seasonal_order=(1, 0, 1, 4)  trend=None
+
+--- [5/5] Instability check (AR/MA roots, full-history fit per candidate) ---
+  PRODUCTION (0, 1, 1)x(1, 0, 1, 4) c, exog=['quadratic_trend'] [OK]
+  ALT: trend flip -> 'n'                                  [OK]
+  ALT: no exog (drop ['quadratic_trend'])                 [OK]
+  ALT: AR(1) only (1,1,0)                                 [OK]
+  ALT: ARMA(1,1) (1,1,1)                                  [OK]
+  BASELINE: white noise (0,1,0)                           [OK]
+
+Reminder: this report is informational. Per the flag-don't-override rule,
+nothing above is auto-applied to exog_config.py - edit it by hand if warranted.

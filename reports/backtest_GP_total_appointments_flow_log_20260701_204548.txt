@@ -1,0 +1,52 @@
+==========================================================================================
+INDIVIDUAL METRIC BACKTEST
+==========================================================================================
+Run started: 2026-07-01T20:45:48.202588
+Input file: C:\Users\44782\Desktop\empirical project\data\processed\combined_quarterly.csv
+Metric: GP total appointments (flow)
+==========================================================================================
+
+
+##########################################################################################
+# METRIC: GP total appointments (flow)
+# Series label: total_attended_appointments
+##########################################################################################
+Loaded 11 observations.
+Range: 2023-10-01 to 2026-04-01
+  Adjusted for series length (n=11): MIN_TRAIN_SIZE=5, HORIZONS=[1, 2, 3]
+Horizons tested: [1, 2, 3] | Min training window: 5
+Candidates (6): ['PRODUCTION (1, 1, 1)x(0, 0, 0, 4) c, exog=none', "ALT: trend flip -> 'n'", 'ALT: add seasonal MA (D=0,Q=0 -> Q=1)', 'ALT: AR(1) only (1,1,0)', 'ALT: MA(1) only (0,1,1)', 'BASELINE: white noise (0,1,0)']
+
+==========================================================================================
+DIAGNOSTIC SEQUENCE (screening report - nothing here is auto-applied)
+==========================================================================================
+
+--- [1/5] Significance screen (OLS, exog vs. level) ---
+  No exog columns configured for this metric - skipping.
+
+--- [2/5] Quadratic trend check ---
+  t^2 coef=-1490567.371795  p=0.0158  [FLAG: significant curvature]
+
+--- [3/5] Stationarity checks (ADF + KPSS) ---
+  level                ADF p=0.5363 [FLAG: non-stationary (ADF)]   KPSS p=0.1000 [stationary]
+  1st diff             ADF p=0.9378 [FLAG: non-stationary (ADF)]   KPSS p=0.0824 [stationary]
+  seasonal diff (4)    (too few observations after differencing - skipped)
+
+--- [4/5] Order selection (AICc grid search, suggestions only) ---
+  Fitted 144/144 grid combinations successfully.
+  AICc=      1.41  order=(0, 0, 0)  seasonal_order=(0, 0, 0, 4)  trend='c'
+  AICc=      2.54  order=(0, 1, 0)  seasonal_order=(0, 0, 0, 4)  trend=None
+  AICc=      2.91  order=(0, 0, 1)  seasonal_order=(0, 0, 0, 4)  trend='c'
+  AICc=      4.18  order=(0, 0, 0)  seasonal_order=(0, 1, 0, 4)  trend=None
+  AICc=      5.02  order=(1, 0, 0)  seasonal_order=(0, 0, 0, 4)  trend='c'
+
+--- [5/5] Instability check (AR/MA roots, full-history fit per candidate) ---
+  PRODUCTION (1, 1, 1)x(0, 0, 0, 4) c, exog=none          [OK]
+  ALT: trend flip -> 'n'                                  [OK]
+  ALT: add seasonal MA (D=0,Q=0 -> Q=1)                   [near-non-invertible MA (min|root|=1.005)]
+  ALT: AR(1) only (1,1,0)                                 [OK]
+  ALT: MA(1) only (0,1,1)                                 [OK]
+  BASELINE: white noise (0,1,0)                           [OK]
+
+Reminder: this report is informational. Per the flag-don't-override rule,
+nothing above is auto-applied to exog_config.py - edit it by hand if warranted.

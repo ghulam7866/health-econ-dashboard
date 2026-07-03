@@ -1,0 +1,198 @@
+
+Loaded 537 forecast records
+Metrics: ['RTT waiting list (level)', 'A&E attendances (flow)', 'Workforce FTE (level)', 'Bed occupancy (level)', 'RTT % within 18 weeks (performance)', 'A&E 12-hour decisions to admit (breach flow)', 'GP total appointments (flow)', 'GP face-to-face appointments (flow)', 'GP telephone appointments (flow)']
+
+============================================================
+VALIDATING: RTT waiting list (level)
+============================================================
+  Historical: 76 points
+  Forecast: 24 points
+  Last historical: 7218231.00
+  First forecast: 5151285.73
+  Last forecast: 6991351.01
+  Max forecast: 6991351.01
+  Min forecast: 5151285.73
+
+  ✅ No spikes/drops detected
+
+  ✅ No uniform pattern detected
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ⚠️ TOO SMOOTH detected:
+    - Almost perfectly fits quadratic (R²=1.000)
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: -28.6%
+    - Change from first to last forecast: +35.7%
+    ⚠️ MODERATE INITIAL CHANGE: -28.6% (review recommended)
+    ✅ Forecast changes are stable
+
+============================================================
+VALIDATING: A&E attendances (flow)
+============================================================
+  Historical: 64 points
+  Forecast: 24 points
+  Last historical: 4802727.00
+  First forecast: 5133837.28
+  Last forecast: 5722829.12
+  Max forecast: 5722829.12
+  Min forecast: 5133837.28
+
+  ⚠️ SPIKES/DROPS detected (1):
+    - Position 1: 5207399.61 (change: +135608.01, z-score: 3.01)
+
+  ✅ No uniform pattern detected
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ✅ Forecast has natural variation
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: +6.9%
+    - Change from first to last forecast: +11.5%
+    ✅ Initial change is reasonable
+    ✅ Forecast changes are stable
+
+============================================================
+VALIDATING: Workforce FTE (level)
+============================================================
+  Historical: 67 points
+  Forecast: 24 points
+  Last historical: 1379060.38
+  First forecast: 1229470.86
+  Last forecast: 1324173.88
+  Max forecast: 1324173.88
+  Min forecast: 1228399.09
+
+  ✅ No spikes/drops detected
+
+  ✅ No uniform pattern detected
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ⚠️ TOO SMOOTH detected:
+    - Almost perfectly fits quadratic (R²=0.999)
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: -10.8%
+    - Change from first to last forecast: +7.7%
+    ✅ Initial change is reasonable
+    ✅ Forecast changes are stable
+
+============================================================
+VALIDATING: Bed occupancy (level)
+============================================================
+  Historical: 57 points
+  Forecast: 24 points
+  Last historical: 117314.87
+  First forecast: 100124.69
+  Last forecast: 120981.16
+  Max forecast: 120981.16
+  Min forecast: 100124.69
+
+  ✅ No spikes/drops detected
+
+  ✅ No uniform pattern detected
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ⚠️ TOO SMOOTH detected:
+    - Almost perfectly fits quadratic (R²=0.988)
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: -14.7%
+    - Change from first to last forecast: +20.8%
+    ✅ Initial change is reasonable
+    ✅ Forecast changes are stable
+
+============================================================
+VALIDATING: RTT % within 18 weeks (performance)
+============================================================
+  Historical: 76 points
+  Forecast: 24 points
+  Last historical: 0.65
+  First forecast: 0.65
+  Last forecast: 0.68
+  Max forecast: 0.68
+  Min forecast: 0.65
+
+  ✅ No spikes/drops detected
+
+  ⚠️ UNIFORM PATTERN detected:
+    - Almost perfectly linear (correlation > 0.99)
+    - Correlation with time: 0.993
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ⚠️ TOO SMOOTH detected:
+    - Almost perfectly fits quadratic (R²=0.986)
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: +0.0%
+    - Change from first to last forecast: +5.0%
+    ✅ Initial change is reasonable
+    ✅ Forecast changes are stable
+
+============================================================
+VALIDATING: A&E 12-hour decisions to admit (breach flow)
+============================================================
+  Historical: 22 points
+  Forecast: 22 points
+  Last historical: 97962.00
+  First forecast: 119465.16
+  Last forecast: 57467.90
+  Max forecast: 161077.96
+  Min forecast: 54867.92
+
+  ✅ No spikes/drops detected
+
+  ✅ No uniform pattern detected
+
+  ✅ No extreme values detected
+
+  ✅ No abrupt trend reversals detected
+
+  ✅ Forecast has natural variation
+
+  📊 PLAUSIBILITY CHECKS:
+    - Change from last historical to first forecast: +22.0%
+    - Change from first to last forecast: -51.9%
+    ⚠️ MODERATE INITIAL CHANGE: +22.0% (review recommended)
+    ⚠️ HIGH OSCILLATION: coefficient of variation in changes = 0.194
+
+======================================================================
+VALIDATION SUMMARY
+======================================================================
+
+                                      metric  n_hist  n_fore  change_initial_pct  change_total_pct  spike_count  uniform_detected  extreme_count  reversal_count overall_score
+                    RTT waiting list (level)      76      24          -28.635067         35.720505            0             False              0               0          PASS
+                      A&E attendances (flow)      64      24            6.894214         11.472741            1             False              0               0        REVIEW
+                       Workforce FTE (level)      67      24          -10.847207          7.702746            0             False              0               0          PASS
+                       Bed occupancy (level)      57      24          -14.653028         20.830497            0             False              0               0          PASS
+         RTT % within 18 weeks (performance)      76      24            0.000000          5.000000            0              True              0               0        REVIEW
+A&E 12-hour decisions to admit (breach flow)      22      22           21.950507        -51.895678            0             False              0               0          PASS
+
+Summary saved to: C:\Users\44782\Desktop\empirical project\reports\forecast_validation_summary_20260702_163858.csv
+Full log saved to: C:\Users\44782\Desktop\empirical project\reports\forecast_validation_log_20260702_163858.txt
+
+======================================================================
+FINAL VERDICT
+======================================================================
+
+⚠️ 2 metrics need review:
+  ❌ A&E attendances (flow): 1 spikes
+  ❌ RTT % within 18 weeks (performance): uniform pattern, too smooth
+
+======================================================================
+Run completed.

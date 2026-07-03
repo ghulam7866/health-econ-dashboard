@@ -1,0 +1,9 @@
+Not yet tested — and worth prioritizing:
+
+A&E attendances (flow) — (0,1,1)x(0,1,1,4) trend='n', no exog. Never stress-tested.
+Workforce FTE (level) — (1,1,1)x(0,1,1,4) trend='c', exog=post_covid_trend_break. Never stress-tested.
+Bed occupancy (level) — (1,0,1)x(0,1,1,4) trend='c', exog=covid_pulse+post_covid_regime. Its own note in exog_config.py literally says "Provisional variables pending diagnostic finalization" — this one's flagged as unfinished business by your past self, so it's probably the highest-value next target.
+
+Skip:
+
+PESA Health spend (level) — uses the separate annual pipeline, not part of this quarterly SARIMAX battery.

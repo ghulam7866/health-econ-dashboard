@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+PESA Health spend (level),20,10,"PRODUCTION (0, 1, 0) n, exog=none",4,58.0033835219981,57.92500000000001,-57.92500000000001,0.0,0.0,OK,FLAG,OK,OK

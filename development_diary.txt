@@ -1,0 +1,551 @@
+# Health Economic Dashboard Project Summary
+
+# Project Aim
+
+The aim of this project was to develop a Health Economic Dashboard capable of producing robust, transparent and automated forecasts for a range of NHS operational metrics. Rather than relying on a single forecasting method, the project developed a model selection framework that evaluates multiple statistical models and automatically selects the most appropriate specification for each metric based on diagnostic testing and out-of-sample forecasting performance.
+
+The dashboard is intended to support health economic analysis, service planning and resource allocation by providing reliable forecasts alongside historical trends.
+
+---
+
+# Dataset
+
+The forecasting system was developed using quarterly NHS time series covering approximately 2010–2026.
+
+Metrics included both stock and flow variables such as:
+
+* RTT waiting list
+* A&E attendances
+* GP appointments
+* Workforce Full-Time Equivalent (FTE)
+* Bed occupancy
+* Elective admissions
+* Emergency admissions
+* Outpatient appointments
+* Cancer pathway measures
+* Diagnostic waiting times
+* 12-hour A&E waits
+* Delayed discharges
+* and other operational indicators
+
+Each metric was modelled independently.
+
+---
+
+# Forecasting Framework
+
+Rather than fitting one model to every series, the project developed an automated forecasting pipeline.
+
+For every metric the pipeline:
+
+* loads and cleans the data
+* performs statistical diagnostics
+* determines appropriate model candidates
+* evaluates candidate models
+* compares forecasting accuracy
+* selects the best-performing model
+* produces forecasts with confidence intervals
+
+This creates a reproducible and objective forecasting process.
+
+---
+
+# Data Preparation
+
+Before modelling, each series underwent preprocessing.
+
+This included:
+
+* converting observations to quarterly time series
+* handling missing observations
+* checking for duplicate timestamps
+* ordering data chronologically
+* identifying structural changes caused by COVID-19
+* generating intervention variables where appropriate
+
+---
+
+# Stationarity Testing
+
+Each series was tested for stationarity using the Augmented Dickey-Fuller (ADF) test.
+
+Depending on the results:
+
+* stationary series were modelled directly
+* non-stationary series were differenced where appropriate
+* integration order informed candidate ARIMA specifications
+
+The stationarity assessment formed the basis for subsequent model selection.
+
+---
+
+# Trend Assessment
+
+Trend behaviour was examined for every metric.
+
+Series displaying long-term growth or decline were modelled using integrated specifications where necessary.
+
+Trend analysis helped determine whether deterministic trends or differencing were required.
+
+---
+
+# Seasonality Assessment
+
+Each metric was assessed for quarterly seasonality.
+
+Methods included:
+
+* visual inspection
+* autocorrelation behaviour
+* seasonal decomposition
+* statistical testing where appropriate
+
+The results informed whether seasonal SARIMA models should be considered.
+
+Metrics with little evidence of seasonality were allowed to compete with non-seasonal ARIMA models.
+
+---
+
+# Structural Break Analysis
+
+A major component of the project was identifying structural changes introduced by COVID-19.
+
+Dummy variables were created representing:
+
+* pandemic onset
+* post-pandemic recovery
+* structural level shifts
+
+Rather than forcing COVID effects into every model, each metric was individually assessed.
+
+This led to the development of a central configuration file (`exog_config.py`) which specifies exactly which intervention variables are included for each metric.
+
+This provides transparency and reproducibility while avoiding unnecessary regressors.
+
+---
+
+# Candidate Model Development
+
+For each metric, multiple candidate models were defined.
+
+These included combinations of:
+
+* ARIMA
+* SARIMA
+* models with and without drift
+* models with and without intercepts
+* seasonal specifications
+* COVID intervention variables
+* transformed and untransformed series
+
+Each candidate specification was explicitly documented.
+
+---
+
+# Rolling-Origin Backtesting
+
+One of the most important components of the project was the implementation of rolling-origin cross-validation.
+
+Instead of evaluating models on a single train-test split, forecasts were repeatedly generated using expanding training windows.
+
+Forecast horizons included:
+
+* 1 quarter
+* 4 quarters
+* 8 quarters
+* 12 quarters
+
+This provides a much more realistic assessment of forecasting performance.
+
+---
+
+# Forecast Accuracy Metrics
+
+Model performance was evaluated using multiple accuracy measures.
+
+These included:
+
+* RMSE
+* MAE
+* MAPE (where appropriate)
+* sMAPE
+* MASE
+
+Using several metrics reduces dependence on any single measure and provides a more balanced assessment of forecasting accuracy.
+
+---
+
+# Residual Diagnostics
+
+Residuals from candidate models were evaluated to ensure assumptions were satisfied.
+
+Diagnostic testing included:
+
+* residual plots
+* autocorrelation checks
+* Ljung-Box tests
+* residual normality assessment
+* variance inspection
+
+Only models with acceptable residual behaviour were considered suitable.
+
+---
+
+# Low Sample Size Considerations
+
+Some NHS metrics contained relatively few observations.
+
+For these series:
+
+* minimum training windows were adjusted
+* simpler model specifications were preferred
+* forecast stability was considered alongside statistical accuracy
+
+This avoided overfitting short time series.
+
+---
+
+# GP Appointment Analysis
+
+GP appointment data received additional investigation because seasonality was uncertain.
+
+The workflow included recommendations to:
+
+* test explicitly for quarterly seasonality
+* compare ETS and random walk benchmarks when seasonality was absent
+* compare benchmark performance against ARIMA models
+
+This ensured the selected forecasting approach reflected the characteristics of the series rather than assuming seasonal behaviour.
+
+---
+
+# Forecast Engine
+
+A unified forecasting engine (`master_forecast_engine.py`) was developed.
+
+The engine automatically:
+
+* imports model configurations
+* applies the correct intervention variables
+* scales data where necessary
+* fits candidate models
+* performs rolling-origin validation
+* ranks models by forecasting accuracy
+* produces forecasts
+* exports results for dashboard visualisation
+
+The forecasting engine is designed to be reusable for additional metrics with minimal modification.
+
+---
+
+# Configuration Management
+
+A dedicated configuration file (`exog_config.py`) was created to separate modelling decisions from forecasting code.
+
+This stores:
+
+* candidate model specifications
+* ARIMA orders
+* seasonal orders
+* drift/intercept settings
+* COVID intervention variables
+
+Separating configuration from execution improves maintainability and reproducibility.
+
+---
+
+# Model Selection Philosophy
+
+Rather than selecting models solely on in-sample goodness of fit (e.g., AIC or BIC), the project prioritised out-of-sample forecasting performance.
+
+Model selection considered:
+
+* rolling-origin forecast accuracy
+* residual diagnostics
+* model stability
+* interpretability
+* structural break handling
+* parsimony
+
+This aligns with best practice in forecasting, where predictive performance is prioritised over in-sample fit.
+
+---
+
+# Dashboard Outputs
+
+The final dashboard presents:
+
+* historical trends
+* forecast trajectories
+* prediction intervals
+* selected model information
+* forecast accuracy statistics
+* comparisons across NHS metrics
+
+Users are therefore able to understand both the forecasts and the statistical evidence supporting them.
+
+---
+
+# Key Technical Features
+
+The completed forecasting framework includes:
+
+* Automated model selection.
+* Rolling-origin cross-validation.
+* Multi-horizon forecast evaluation.
+* Statistical diagnostic testing.
+* Stationarity assessment.
+* Seasonality assessment.
+* Structural break modelling.
+* Metric-specific COVID intervention variables.
+* Centralised model configuration.
+* Automated forecasting engine.
+* Confidence interval generation.
+* Transparent and reproducible methodology.
+
+---
+
+# Overall Outcome
+
+The project produced a robust and extensible forecasting framework for NHS health economic indicators. By combining formal statistical diagnostics, automated model selection, rolling-origin validation and transparent configuration management, the system generates forecasts that are both statistically rigorous and suitable for practical health economic decision-making. The modular design also enables additional metrics to be incorporated with minimal redevelopment, supporting future expansion of the dashboard.
+
+
+# Health Economic Dashboard – Development Summary
+
+## Project overview
+
+An independent health economics forecasting project developing an automated forecasting dashboard for NHS England operational metrics. The project aimed to produce statistically robust, interpretable forecasts for multiple healthcare indicators using a common forecasting framework while allowing each series to have its own validated model specification.
+
+The dashboard currently forecasts:
+
+* RTT waiting list
+* A&E attendances
+* A&E 12-hour breaches
+* GP appointments
+* Workforce FTE
+* Bed occupancy
+
+Each metric is modelled independently, with model specifications determined through a structured validation process rather than applying a single forecasting model across all series.
+
+---
+
+## Core methodology / modelling philosophy
+
+The project evolved from a standard SARIMAX forecasting pipeline into a **validation-first forecasting framework**.
+
+Rather than searching for the "best" model using AIC alone, every modelling decision had to be supported by multiple sources of evidence.
+
+Throughout development we progressively introduced a workflow that required consideration of:
+
+* statistical significance of intervention variables
+* stationarity and differencing requirements
+* seasonality diagnostics
+* residual behaviour
+* rolling-origin backtesting
+* long-horizon forecast behaviour
+* practical interpretability
+
+A model was only promoted into production once it performed well across the entire validation process rather than excelling in a single metric.
+
+---
+
+## Major methodological developments
+
+### Candidate-based forecasting
+
+The original engine relied on a single configuration for each series.
+
+This was replaced with a candidate-based framework, allowing multiple competing model specifications to be evaluated automatically before selecting the preferred model.
+
+Candidate models differed by:
+
+* ARIMA orders
+* seasonal structure
+* trend specification
+* intervention variables
+* estimation window
+
+This made the model selection process reproducible and evidence-driven.
+
+---
+
+### Metric-specific intervention modelling
+
+Rather than assuming every metric required the same COVID adjustment, intervention variables were evaluated separately for each series.
+
+Several metrics retained no intervention variables at all, while others required combinations of pulse, regime or trend-break effects.
+
+This resulted in `exog_config.py` becoming a true metric-specific configuration file instead of a shared set of regressors.
+
+---
+
+### Forecast validation replacing information criteria
+
+As development progressed, increasing emphasis was placed on out-of-sample forecasting performance.
+
+Rolling-origin cross-validation became the primary basis for model comparison, with AIC and BIC used only as supporting diagnostics.
+
+Forecast trajectory inspection also became an explicit stage of validation after several statistically acceptable models produced implausible long-term behaviour.
+
+---
+
+### Structural break handling
+
+Considerable work was undertaken to improve modelling of COVID-related structural breaks.
+
+Different intervention formulations were compared across metrics, with decisions based on both statistical significance and forecast behaviour rather than theoretical preference alone.
+
+This resulted in different intervention strategies for different NHS metrics rather than enforcing a single approach.
+
+---
+
+## Engine improvements
+
+The forecasting engine underwent several major revisions during development.
+
+Key improvements included:
+
+* automated candidate evaluation
+* unified forecasting workflow
+* dynamic loading of model specifications from `exog_config.py`
+* automated rolling-origin backtesting
+* forecast ranking using multiple accuracy metrics
+* improved residual diagnostics
+* configurable estimation windows
+* cleaner separation between configuration and execution code
+
+The resulting engine became substantially more modular and easier to extend.
+
+---
+
+## Analytical investigations
+
+Several additional investigations were undertaken as issues emerged during model development.
+
+### Low-observation series
+
+GP appointment series highlighted the limitations of fitting relatively complex time-series models to very short datasets.
+
+Alternative benchmark models and simpler specifications were explored to determine whether reduced model complexity improved forecast stability.
+
+This work also led to discussion of when ETS or random walk benchmarks should be preferred over SARIMA models.
+
+---
+
+### Seasonality assessment
+
+Additional diagnostic scripts were developed to investigate whether apparent quarterly seasonality genuinely existed within selected metrics.
+
+Where seasonality appeared weak, recommendations were made to compare seasonal models against non-seasonal alternatives rather than assuming seasonal structure.
+
+---
+
+### Forecast behaviour
+
+Attention gradually shifted from statistical fit towards forecast realism.
+
+Several candidate models were rejected despite acceptable diagnostic statistics because they produced:
+
+* unrealistic long-term growth
+* implausible declines
+* unstable confidence intervals
+* excessive extrapolation beyond the observed data
+
+Forecast interpretability therefore became an explicit model selection criterion.
+
+---
+
+## Codebase improvements
+
+During development the forecasting codebase became considerably more robust.
+
+Major improvements included:
+
+* separating configuration from execution
+* simplifying candidate definitions
+* improving error handling
+* protecting against model estimation failures
+* improving handling of short series
+* strengthening diagnostic reporting
+* making model decisions transparent through configuration rather than hard-coded logic
+
+---
+
+## Bugs and issues resolved
+
+A number of implementation issues were identified through iterative testing.
+
+These included:
+
+* candidate models unintentionally sharing exogenous regressors
+* inconsistent scaling between training and future exogenous variables
+* automatic modification of validated model orders
+* unstable estimation for higher-order models fitted to very short series
+* artificial constraints affecting forecast trajectories
+* export issues affecting historical data for skipped models
+
+Each issue resulted in corresponding changes to improve transparency, reproducibility and forecast reliability.
+
+---
+
+## Current status
+
+The forecasting framework now consists of:
+
+* a central configuration file defining validated model specifications
+* an automated forecasting engine
+* rolling-origin validation procedures
+* statistical diagnostic scripts
+* intervention variable testing
+* forecast comparison across candidate models
+* automated export of historical observations and forecasts for dashboard integration
+
+The system has evolved into a reusable forecasting framework rather than a collection of independent forecasting scripts.
+
+---
+
+## Remaining work
+
+The remaining development work focuses primarily on refining a small number of challenging series rather than redesigning the framework itself.
+
+Current priorities include:
+
+* completing final validation of the selected A&E 12-hour breach model
+* further investigation of GP appointment forecasting with limited historical observations
+* expanding benchmark comparisons where seasonality remains uncertain
+* integrating future metrics into the existing automated workflow
+
+Overall, the project has progressed from an initial SARIMAX forecasting script into a modular forecasting framework capable of selecting, validating and deploying metric-specific forecasting models for NHS operational data.
+
+Here's a full run-through of the NHS health economics forecasting dashboard project, organized for your documentation:
+Project Overview
+A Python-based empirical portfolio project forecasting key NHS performance metrics using time-series econometrics, with a Streamlit front end and a systematic backtesting framework to validate model performance.
+Core Methodology
+
+Modeling approach: SARIMAX (Seasonal ARIMA with exogenous regressors) via statsmodels, applied across multiple NHS metrics
+Configuration: Centralized in exog_config.py, so each metric's spec (differencing orders, seasonal terms, exogenous variables) is defined in one place rather than scattered through the codebase
+Governance rule: Strict "flag-don't-override" principle — diagnostic scripts flag issues (e.g. residual autocorrelation, over-differencing) but never auto-apply spec changes. All changes are reviewed and applied manually.
+
+Metrics Covered & Per-Metric Decisions
+
+RTT % within 18 weeks — dropped seasonal differencing (D=1 was causing over-differencing)
+RTT waiting list level — retained production seasonal differencing
+A&E attendances — dropped seasonal differencing
+Workforce FTE — retained production spec, after fixing an exogenous variable bug
+Bed occupancy — added regular differencing (d=1)
+A&E 12-hour breach flow — restricted fit window to post-2021 data; confidence interval collapse at long horizons documented as a structural limitation rather than "fixed"
+GP appointments (total, face-to-face, telephone) — capped at 3-quarter forecast horizon, empty exogenous set, AR(1) no-trend spec, due to only ~11 quarters of usable data
+
+Key Bug Fix
+Found and fixed a critical exogenous-variable bug where future exog values were hardcoded to zero instead of being forecast forward. Fixed using last-step linear extrapolation.
+Backtesting Infrastructure
+Built backtest_all_metrics.py — a master script that loops over all metrics automatically and runs:
+
+Five-stage diagnostic checks
+Rolling-origin backtests
+Bias summaries
+Residual diagnostics: Ljung-Box (autocorrelation), Jarque-Bera (normality), ARCH LM (heteroskedasticity)
+
+Outputs: timestamped logs per run + a cross-metric summary CSV for comparison.
+Front End
+Streamlit dashboard layer to surface the forecasts and diagnostics interactively (built alongside the modeling work).

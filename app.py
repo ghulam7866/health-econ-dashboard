@@ -16,7 +16,7 @@ Input:
 Output:
     Interactive Streamlit dashboard in the browser
 
-Last updated: 2026-07-02
+Last updated: 2026-07-03
 """
 
 import streamlit as st
@@ -85,7 +85,12 @@ def calculate_ci_width(fore_df):
     return ci_width
 
 
-def calculate_forecast_quality(fore_df, metric_name=""):
+def is_percentage_metric(metric_name):
+    """Check if a metric represents a percentage."""
+    return "%" in metric_name or "percentage" in metric_name.lower() or "within 18 weeks" in metric_name.lower()
+
+
+def calculate_forecast_quality(fore_df, hist_df=None, metric_name=""):
     """
     Assess forecast quality based on variation and direction.
 
@@ -93,26 +98,27 @@ def calculate_forecast_quality(fore_df, metric_name=""):
     ----------
     fore_df : pd.DataFrame
         Forecast DataFrame with value column
+    hist_df : pd.DataFrame, optional
+        Historical DataFrame for reference
     metric_name : str
         Name of the metric for context
 
     Returns
     -------
     tuple
-        (quality_rating, direction, variation_score)
+        (quality_rating, direction, variation_score, change_pct)
     """
     if fore_df.empty or len(fore_df) < 3:
-        return "Insufficient data", "Unknown", None
+        return "Insufficient data", "Unknown", None, None
 
     values = fore_df["value"].values
     diff = np.diff(values)
 
+    # Calculate variation
     if len(diff) > 1:
-        # Calculate coefficient of variation of changes
         mean_abs_change = np.mean(np.abs(diff))
         mean_value = np.mean(values)
         
-        # Relative variation (as percentage of mean value)
         if mean_value > 0:
             rel_variation = (mean_abs_change / mean_value) * 100
         else:
@@ -137,14 +143,23 @@ def calculate_forecast_quality(fore_df, metric_name=""):
                 quality = f"High variation: expected for volatile series ({rel_variation:.1f}%)"
             else:
                 quality = f"High variation: possibly due to over-fitting or series volatility ({rel_variation:.1f}%)"
-        
-        variation = rel_variation
     else:
+        rel_variation = None
         quality = "Insufficient data for variation assessment"
-        variation = None
 
-    # Direction with tolerance for flat forecasts
-    if len(values) > 1:
+    # Direction based on the FULL forecast trend (linear regression slope)
+    if len(values) > 3:
+        t = np.arange(len(values))
+        slope = np.polyfit(t, values, 1)[0]
+        # Use slope sign with a small tolerance
+        if slope > 0:
+            direction = "Increasing"
+        elif slope < 0:
+            direction = "Decreasing"
+        else:
+            direction = "Stable"
+    else:
+        # Fallback to first vs last for short forecasts
         first_val = values[0]
         last_val = values[-1]
         pct_change = ((last_val - first_val) / abs(first_val)) * 100 if first_val != 0 else 0
@@ -154,10 +169,30 @@ def calculate_forecast_quality(fore_df, metric_name=""):
             direction = "Decreasing"
         else:
             direction = "Stable"
-    else:
-        direction = "Unknown"
 
-    return quality, direction, variation
+    # Calculate change from last historical to last forecast
+    change_pct = None
+    if hist_df is not None and not hist_df.empty:
+        last_hist = hist_df["value"].iloc[-1]
+        last_fore = values[-1]
+        if last_hist != 0:
+            change_pct = ((last_fore - last_hist) / abs(last_hist)) * 100
+        else:
+            change_pct = None
+
+    return quality, direction, rel_variation, change_pct
+
+
+def format_value(value, metric_name, is_percentage=False):
+    """Format a value appropriately based on metric type."""
+    if is_percentage or is_percentage_metric(metric_name):
+        return f"{value:.1%}" if value < 1 else f"{value:.1f}%"
+    elif value >= 1e6:
+        return f"{value/1e6:.2f}M"
+    elif value >= 1e3:
+        return f"{value/1e3:.1f}K"
+    else:
+        return f"{value:.1f}"
 
 
 def main():
@@ -194,7 +229,14 @@ def main():
             st.warning(
                 "Data Limitation: GP appointments data is only available from October 2023. "
                 "With only 11 quarterly observations, reliable forecasting is not possible. "
-                "Only historical data is shown."
+                "Only historical data is shown. This is a data scope limitation."
+            )
+
+        # Display warning for volatile A&E 12-hour breach series
+        if "A&E 12-hour" in selected_metric and "breach" in selected_metric.lower():
+            st.warning(
+                "Note: This series is highly volatile with a short history (22 observations post-2021). "
+                "Confidence intervals are wide and should be interpreted with caution."
             )
 
         metric_df = df[df["metric"] == selected_metric].sort_values("quarter")
@@ -316,6 +358,9 @@ def main():
         st.markdown("---")
         st.subheader("Summary Statistics")
 
+        # Check if metric is a percentage
+        is_pct = is_percentage_metric(selected_metric)
+
         # Row 1: Key metrics
         col1, col2, col3, col4 = st.columns(4)
 
@@ -334,18 +379,25 @@ def main():
 
         with col3:
             if not fore_df.empty and not hist_df.empty and not selected_metric.startswith("GP"):
-                growth = ((fore_df["value"].iloc[-1] - hist_df["value"].iloc[-1]) / hist_df["value"].iloc[-1]) * 100
-                st.metric(label="Total Forecast Change", value=f"{growth:+.1f}%")
+                last_hist = hist_df["value"].iloc[-1]
+                last_fore = fore_df["value"].iloc[-1]
+                if is_pct:
+                    # For percentage metrics, show change in percentage points
+                    change = last_fore - last_hist
+                    st.metric(label="Total Forecast Change", value=f"{change:+.1f} pp")
+                else:
+                    growth = ((last_fore - last_hist) / abs(last_hist)) * 100 if last_hist != 0 else 0
+                    st.metric(label="Total Forecast Change", value=f"{growth:+.1f}%")
             else:
                 st.metric(label="Total Forecast Change", value="N/A")
 
         with col4:
             if not fore_df.empty and show_ci:
                 ci_width = calculate_ci_width(fore_df)
-                if ci_width is not None:
+                if ci_width is not None and np.isfinite(ci_width) and ci_width < 500:
                     st.metric(label="Avg CI Width", value=f"±{ci_width:.1f}%")
                 else:
-                    st.metric(label="Avg CI Width", value="N/A")
+                    st.metric(label="Avg CI Width", value="Wide (see note)")
             else:
                 st.metric(label="Avg CI Width", value="N/A")
 
@@ -366,14 +418,14 @@ def main():
 
         with col3:
             if not fore_df.empty and not selected_metric.startswith("GP"):
-                quality, direction, variation = calculate_forecast_quality(fore_df, selected_metric)
+                quality, direction, variation, change = calculate_forecast_quality(fore_df, hist_df, selected_metric)
                 st.metric(label="Forecast Direction", value=direction)
             else:
                 st.metric(label="Forecast Direction", value="N/A")
 
         with col4:
             if not fore_df.empty and not selected_metric.startswith("GP"):
-                quality, direction, variation = calculate_forecast_quality(fore_df, selected_metric)
+                quality, direction, variation, change = calculate_forecast_quality(fore_df, hist_df, selected_metric)
                 st.metric(label="Forecast Quality", value=quality)
             else:
                 st.metric(label="Forecast Quality", value="N/A")
@@ -385,26 +437,52 @@ def main():
         with col1:
             st.markdown("**Historical Data**")
             if not hist_df.empty:
-                st.write(f"- Start: {hist_df['quarter'].min().strftime('%Y-%m-%d')}")
-                st.write(f"- End: {hist_df['quarter'].max().strftime('%Y-%m-%d')}")
-                st.write(f"- Min: {hist_df['value'].min():,.0f}")
-                st.write(f"- Max: {hist_df['value'].max():,.0f}")
-                st.write(f"- Mean: {hist_df['value'].mean():,.0f}")
+                hist_min = hist_df["value"].min()
+                hist_max = hist_df["value"].max()
+                hist_mean = hist_df["value"].mean()
+                if is_pct:
+                    st.write(f"- Start: {hist_df['quarter'].min().strftime('%Y-%m-%d')}")
+                    st.write(f"- End: {hist_df['quarter'].max().strftime('%Y-%m-%d')}")
+                    st.write(f"- Min: {hist_min:.1%}")
+                    st.write(f"- Max: {hist_max:.1%}")
+                    st.write(f"- Mean: {hist_mean:.1%}")
+                else:
+                    st.write(f"- Start: {hist_df['quarter'].min().strftime('%Y-%m-%d')}")
+                    st.write(f"- End: {hist_df['quarter'].max().strftime('%Y-%m-%d')}")
+                    st.write(f"- Min: {hist_min:,.0f}")
+                    st.write(f"- Max: {hist_max:,.0f}")
+                    st.write(f"- Mean: {hist_mean:,.0f}")
             else:
                 st.write("No historical data available")
 
         with col2:
             st.markdown("**Forecast Data**")
             if not fore_df.empty and not selected_metric.startswith("GP"):
+                fore_min = fore_df["value"].min()
+                fore_max = fore_df["value"].max()
+                fore_mean = fore_df["value"].mean()
                 st.write(f"- Start: {fore_df['quarter'].min().strftime('%Y-%m-%d')}")
                 st.write(f"- End: {fore_df['quarter'].max().strftime('%Y-%m-%d')}")
-                st.write(f"- Final value: {fore_df['value'].iloc[-1]:,.0f}")
+                if is_pct:
+                    st.write(f"- Min: {fore_min:.1%}")
+                    st.write(f"- Max: {fore_max:.1%}")
+                    st.write(f"- Mean: {fore_mean:.1%}")
+                else:
+                    st.write(f"- Min: {fore_min:,.0f}")
+                    st.write(f"- Max: {fore_max:,.0f}")
+                    st.write(f"- Mean: {fore_mean:,.0f}")
                 if not hist_df.empty:
-                    st.write(f"- Change: {((fore_df['value'].iloc[-1] - hist_df['value'].iloc[-1]) / hist_df['value'].iloc[-1]) * 100:+.1f}%")
-                # Forecast quality
-                if len(fore_df) > 2:
-                    quality, direction, variation = calculate_forecast_quality(fore_df, selected_metric)
-                    st.write(f"- Variation: {quality}")
+                    last_hist = hist_df["value"].iloc[-1]
+                    last_fore = fore_df["value"].iloc[-1]
+                    if is_pct:
+                        change = last_fore - last_hist
+                        st.write(f"- Change: {change:+.1f} pp")
+                    else:
+                        growth = ((last_fore - last_hist) / abs(last_hist)) * 100 if last_hist != 0 else 0
+                        st.write(f"- Change: {growth:+.1f}%")
+                quality, direction, variation, change = calculate_forecast_quality(fore_df, hist_df, selected_metric)
+                if variation is not None:
+                    st.write(f"- Variation: {variation:.1f}%")
             else:
                 st.write("No forecast available")
 
@@ -413,16 +491,26 @@ def main():
             if not fore_df.empty and show_ci and "ci_lower" in fore_df.columns and "ci_upper" in fore_df.columns:
                 ci_lower = fore_df["ci_lower"].min()
                 ci_upper = fore_df["ci_upper"].max()
-                st.write(f"- CI lower: {ci_lower:,.0f}")
-                st.write(f"- CI upper: {ci_upper:,.0f}")
+                if is_pct:
+                    st.write(f"- CI lower: {ci_lower:.1%}")
+                    st.write(f"- CI upper: {ci_upper:.1%}")
+                else:
+                    st.write(f"- CI lower: {ci_lower:,.0f}")
+                    st.write(f"- CI upper: {ci_upper:,.0f}")
                 ci_width = calculate_ci_width(fore_df)
-                if ci_width is not None:
+                if ci_width is not None and np.isfinite(ci_width):
                     st.write(f"- Avg width: ±{ci_width:.1f}%")
                 if not fore_df.empty:
                     narrowest = ((fore_df["ci_upper"] - fore_df["ci_lower"]) / fore_df["value"]).min() * 100
                     widest = ((fore_df["ci_upper"] - fore_df["ci_lower"]) / fore_df["value"]).max() * 100
-                    st.write(f"- Narrowest: ±{narrowest:.1f}%")
-                    st.write(f"- Widest: ±{widest:.1f}%")
+                    if np.isfinite(narrowest) and narrowest < 500:
+                        st.write(f"- Narrowest: ±{narrowest:.1f}%")
+                    else:
+                        st.write("- Narrowest: N/A (wide intervals)")
+                    if np.isfinite(widest) and widest < 500:
+                        st.write(f"- Widest: ±{widest:.1f}%")
+                    else:
+                        st.write("- Widest: N/A (wide intervals)")
             else:
                 st.write("No confidence intervals available")
 

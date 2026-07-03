@@ -1,0 +1,142 @@
+==========================================================================================
+INDIVIDUAL METRIC BACKTEST
+==========================================================================================
+Run started: 2026-07-01T20:54:44.437758
+Input file: C:\Users\44782\Desktop\empirical project\data\processed\combined_quarterly.csv
+Metric: GP face-to-face appointments (flow)
+==========================================================================================
+
+
+##########################################################################################
+# METRIC: GP face-to-face appointments (flow)
+# Series label: attended_face_to_face
+##########################################################################################
+Loaded 11 observations.
+Range: 2023-10-01 to 2026-04-01
+  Adjusted for series length (n=11): MIN_TRAIN_SIZE=5, HORIZONS=[1, 2, 3]
+Horizons tested: [1, 2, 3] | Min training window: 5
+Candidates (7): ['PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none', "ALT: trend flip -> 'n'", 'ALT: add seasonal MA (D=0,Q=0 -> Q=1)', 'REGRESSION CHECK: d=0->1', 'ALT: AR(1) only (1,0,0)', 'ALT: MA(1) only (0,0,1)', 'ALT: ARMA(1,1) (1,0,1)']
+
+==========================================================================================
+DIAGNOSTIC SEQUENCE (screening report - nothing here is auto-applied)
+==========================================================================================
+
+--- [1/5] Significance screen (OLS, exog vs. level) ---
+  No exog columns configured for this metric - skipping.
+
+--- [2/5] Quadratic trend check ---
+  t^2 coef=-957290.055944  p=0.0141  [FLAG: significant curvature]
+
+--- [3/5] Stationarity checks (ADF + KPSS) ---
+  level                ADF p=0.7671 [FLAG: non-stationary (ADF)]   KPSS p=0.1000 [stationary]
+  1st diff             ADF p=0.9163 [FLAG: non-stationary (ADF)]   KPSS p=0.0798 [stationary]
+  seasonal diff (4)    (too few observations after differencing - skipped)
+
+--- [4/5] Order selection (AICc grid search, suggestions only) ---
+  Fitted 144/144 grid combinations successfully.
+  AICc=      1.45  order=(0, 0, 0)  seasonal_order=(0, 0, 0, 4)  trend='c'
+  AICc=      2.13  order=(0, 1, 0)  seasonal_order=(0, 0, 0, 4)  trend=None
+  AICc=      3.51  order=(0, 0, 1)  seasonal_order=(0, 0, 0, 4)  trend='c'
+  AICc=      3.64  order=(0, 1, 1)  seasonal_order=(0, 0, 0, 4)  trend=None
+  AICc=      4.24  order=(0, 0, 0)  seasonal_order=(0, 1, 0, 4)  trend=None
+
+--- [5/5] Instability check (AR/MA roots, full-history fit per candidate) ---
+  PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none          [OK]
+  ALT: trend flip -> 'n'                                  [OK]
+  ALT: add seasonal MA (D=0,Q=0 -> Q=1)                   [OK]
+  REGRESSION CHECK: d=0->1                                [OK]
+  ALT: AR(1) only (1,0,0)                                 [OK]
+  ALT: MA(1) only (0,0,1)                                 [near-non-invertible MA (min|root|=1.000)]
+  ALT: ARMA(1,1) (1,0,1)                                  [OK]
+
+Reminder: this report is informational. Per the flag-don't-override rule,
+nothing above is auto-applied to exog_config.py - edit it by hand if warranted.
+
+==========================================================================================
+BACKTEST RESULTS (rolling-origin, expanding window)
+==========================================================================================
+
+--- Horizon = 1 quarter(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none            515877857.82938936660.3427+5016373.9598    0.80    0.80
+ALT: trend flip -> 'n'                                    548365826.501646063357.2000-46063357.2000    0.60    1.00
+ALT: add seasonal MA (D=0,Q=0 -> Q=1)                     516567940.40199778016.7416+4722050.3480    0.60    0.80
+REGRESSION CHECK: d=0->1                                  516737660.912510154471.8000+7400894.2000    0.00    0.80
+ALT: AR(1) only (1,0,0)                                   515891500.38679099557.7341+4793823.3181    0.80    0.80
+ALT: MA(1) only (0,0,1)                                   514934934.28049890427.8111+2926564.0666    0.60    0.80
+ALT: ARMA(1,1) (1,0,1)                                    515889224.37429095370.6508+4950312.3580    0.60    0.80
+
+--- Horizon = 2 quarter(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none            417691281.226011315686.4908+5981300.1752    0.75    0.75
+ALT: trend flip -> 'n'                                    447795664.433044933634.7500-44933634.7500    0.50    1.00
+ALT: add seasonal MA (D=0,Q=0 -> Q=1)                     418191469.061012329757.7080+5302635.0173    0.75    0.75
+REGRESSION CHECK: d=0->1                                  420599721.359912840934.5000+8508423.0000    0.00    0.75
+ALT: AR(1) only (1,0,0)                                   418417634.391711182035.7825+6940284.9553    0.75    0.75
+ALT: MA(1) only (0,0,1)                                   417973493.593010650303.0561+7094825.8533    1.00    0.75
+ALT: ARMA(1,1) (1,0,1)                                    417617786.070811351630.6997+5885282.6980    0.75    0.75
+
+--- Horizon = 3 quarter(s) ahead ---
+Spec                                                      n     RMSE      MAE     Bias  DirAcc   CICov
+PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none            320005018.611114515312.2091+8053266.4563    0.67    0.67
+ALT: trend flip -> 'n'                                    346394567.419742654197.3333-42654197.3333    0.33    1.00
+ALT: add seasonal MA (D=0,Q=0 -> Q=1)                     320166118.856815618369.8484+6821185.4369    0.33    0.67
+REGRESSION CHECK: d=0->1                                  320283274.776413772565.3333+9446482.6667    0.00    0.67
+ALT: AR(1) only (1,0,0)                                   320244165.566014294179.9609+8656552.8054    0.67    0.67
+ALT: MA(1) only (0,0,1)                                   320579997.118914182222.6613+9239205.8649    0.33    0.67
+ALT: ARMA(1,1) (1,0,1)                                    320180570.785814779657.8775+7968893.4789    0.33    0.67
+
+Notes:
+  Bias > 0 = over-forecasting; < 0 = under-forecasting.
+  DirAcc = fraction of folds where forecast correctly called up/down vs last known value.
+  CICov  = fraction of folds where actual fell inside the model's own 95% CI (target ~0.95).
+
+==========================================================================================
+BIAS SUMMARY - production + near-neighbour variants, long horizons
+(horizons shown: [2, 3])
+==========================================================================================
+Spec                                                                h=2             h=3
+PRODUCTION (0, 0, 0)x(0, 0, 0, 4) c, exog=none         +5981300.1752(OVER)+8053266.4563(OVER)
+ALT: trend flip -> 'n'                                 -44933634.7500(UNDER)-42654197.3333(UNDER)
+ALT: add seasonal MA (D=0,Q=0 -> Q=1)                  +5302635.0173(OVER)+6821185.4369(OVER)
+REGRESSION CHECK: d=0->1                               +8508423.0000(OVER)+9446482.6667(OVER)
+ALT: AR(1) only (1,0,0)                                +6940284.9553(OVER)+8656552.8054(OVER)
+ALT: MA(1) only (0,0,1)                                +7094825.8533(OVER)+9239205.8649(OVER)
+ALT: ARMA(1,1) (1,0,1)                                 +5885282.6980(OVER)+7968893.4789(OVER)
+
+==========================================================================================
+RESIDUAL DIAGNOSTICS (production spec, full-history fit)
+==========================================================================================
+
+  Ljung-Box (H0: no autocorrelation left in residuals)
+    lag=4   stat=0.316  p=0.9887  [OK]
+    lag=8   stat=2.317  p=0.9697  [OK]
+
+  Jarque-Bera (H0: residuals normal): stat=8.708  p=0.0129  skew=-1.868  kurtosis=5.245  [FLAG: residuals non-normal]
+
+  ARCH LM: too few residuals to test - skipped.
+
+  Note: with quarterly NHS series this short, low power on all three tests
+  is expected - treat a single borderline p-value as a flag to note, not a verdict.
+
+
+==========================================================================================
+COMPACT SUMMARY
+==========================================================================================
+Metric: GP face-to-face appointments (flow)
+Observations: 11
+Longest horizon tested: 3
+RMSE at longest horizon: 20005018.6111
+MAE at longest horizon: 14515312.2091
+Bias at longest horizon: 8053266.4563
+Direction Accuracy: 0.67
+CI Coverage: 0.67
+Ljung-Box: OK
+Jarque-Bera: FLAG
+ARCH: N/A
+
+Summary saved to: C:\Users\44782\Desktop\empirical project\reports\backtest_GP_face-to-face_appointments_flow_summary_20260701_205444.csv
+
+Full log saved to: C:\Users\44782\Desktop\empirical project\reports\backtest_GP_face-to-face_appointments_flow_log_20260701_205444.txt
+==========================================================================================
+Run completed.

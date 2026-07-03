@@ -1,4 +1,0 @@
-metric,adf_level_p,kpss_level_p,adf_diff1_p,kpss_diff1_p,recommended_d
-RTT waiting list (level),0.8376761809057682,0.01,0.006769788388079887,0.07425251455146224,1
-A&E attendances (flow),0.0005712020303349328,0.012344278049179532,1.642664653994189e-14,0.1,1
-Workforce FTE (level),0.6546778328850295,0.01,0.6073884125889207,0.01,"2 (or ambiguous — inspect manually, may need 2nd diff or structural break handling)"

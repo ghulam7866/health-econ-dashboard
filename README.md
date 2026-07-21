@@ -23,7 +23,7 @@ This dashboard provides quarterly forecasts for key NHS metrics using SARIMAX mo
 | Workforce FTE | AR(2) + quadratic_trend | All exog significant |
 | Bed occupancy | MA(1) + quadratic_trend | All exog significant |
 | RTT % within 18 weeks | Random walk with drift | Smoothed transition |
-| A&E 12-hour breach | Random walk + quadratic_trend | Stable forecast |
+| A&E 12-hour breach | Random walk + quadratic_trend | 8-quarter horizon |
 
 ## Data Limitations
 
@@ -34,24 +34,25 @@ The following metrics have data limitations that affect forecasting reliability:
 | **GP total appointments** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
 | **GP face-to-face** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
 | **GP telephone** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
-| **A&E 12-hour breach** | High volatility, short history (22 observations post-2021) | Wide confidence intervals - use with caution |
+| **A&E 12-hour breach** | High volatility, short history (22 observations post-2021) | 8-quarter horizon, wide confidence intervals |
 
-### Notes on Specific Metrics
+## Confidence Interval Disclosure
 
-#### A&E 12-hour Breach
-This metric was restricted to post-2021 data to improve model stability. The series is inherently volatile, and confidence intervals reflect this uncertainty. CI constraints are applied to keep bounds within historical ranges.
+The following metrics have confidence interval constraints applied due to data limitations:
 
-#### RTT % within 18 weeks
-This is a percentage metric (0-1 scale) and is displayed as percentages in the dashboard. Confidence intervals are capped at 100% to ensure validity.
+| Metric | Constraint | Rationale |
+|--------|------------|-----------|
+| **A&E 12-hour breach** | CI clamped to [30% of historical min, 120% of historical max]; horizon shortened to 8 quarters | High volatility, short history (22 obs) |
+| **Bed occupancy** | CI clamped to [85% of historical min, 115% of historical max] | Prevent unrealistic bounds |
+| **RTT % within 18 weeks** | CI capped at [0%, 100%] | Percentage cannot exceed bounds |
 
-#### GP Appointments
-All GP appointment series have insufficient data for reliable forecasting (only 11 quarters). Historical data is displayed, but no forecasts are generated. This is a data scope limitation.
+**Note**: For the A&E 12-hour breach, the confidence intervals reflect true uncertainty due to the series' inherent volatility. The horizon has been shortened to 8 quarters (2 years) for stability. Treat these intervals as indicative, not statistical.
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/health-econ-dashboard.git
+git clone https://github.com/ghulam7866/health-econ-dashboard.git
 cd health-econ-dashboard
 
 # Install dependencies

@@ -1,35 +1,33 @@
 """
 align_merge.py
 ---------------
-Filters each processed CSV down to the confirmed headline metrics, then
-resamples everything onto a shared quarterly calendar so they can be
-combined into one dataset for the dashboard.
+Filters each cleaned CSV down to the headline metrics, then resamples
+everything onto a shared quarterly calendar so they can be combined into
+a single dataset for the dashboard and forecasting engine.
 
-Frequency choice: quarterly. Beds (KH03) is already quarterly and is the
-coarsest genuinely-periodic source, so monthly sources are downsampled to
-match rather than upsampling Beds to monthly (which would just be
-interpolation, not real data).
+Frequency choice: quarterly.
+Beds (KH03) is already quarterly and is the coarsest genuinely periodic
+source, so monthly sources are down‑sampled to match rather than
+up‑sampling beds to monthly (which would be interpolation, not real data).
 
-Aggregation rule depends on what each metric actually represents:
-  - FLOW  (events during the period, e.g. appointments, completed
-           pathways, attendances)        -> summed across the quarter
-  - STOCK (snapshot at a point in time, e.g. number currently waiting)
-                                          -> averaged across the quarter
-  - RATE  (already a ratio/percentage/median, e.g. % within 18 weeks)
-                                          -> averaged across the quarter
-  - Workforce FTE (a level reported as of a date)
-                                          -> last month's value in the quarter
+Aggregation rules depend on what each metric actually represents:
+  • FLOW  (events during the period)  → summed across the quarter
+  • STOCK (snapshot at a point)       → averaged across the quarter
+  • RATE  (ratio / percentage)        → averaged across the quarter
+  • Workforce FTE (level as of a date)→ last month's value in the quarter
 
-Annual sources (Population, PESA) are forward-filled across the quarters
-of their year, since no finer-grained truth exists. This is a real
-methodological approximation - flag it in your write-up rather than
-treating it as genuinely quarterly data.
+Annual sources (Population, PESA) are forward‑filled across the quarters
+of their year.  This is an approximation – flag it in your methodology
+write‑up rather than treating it as genuinely quarterly data.
 
-NICE is NOT merged in here - it's 9 discrete policy events, not a time
-series. Use nice_clean.csv separately as annotation markers (e.g.
-vertical lines at policy dates) when plotting, not as a merged column.
+NICE QALY thresholds are NOT merged here – they are discrete policy events
+and should be used as annotation markers on charts, not as a time series.
 
-UPDATED: 2026-07-01 - Added quadratic_trend for RTT waiting list curvature.
+ITS design columns (`t`, `post_covid_slope_change`) are added in this
+script to support the interrupted time series analysis in the forecast
+engine.
+
+UPDATED: 2026‑07‑13 – Added ITS design columns.
 
 Run:
     python align_merge.py
@@ -37,6 +35,7 @@ Run:
 Output:
     data/processed/combined_quarterly.csv
 """
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -45,9 +44,8 @@ PROCESSED_DIR = Path(r"C:\Users\44782\Desktop\empirical project\data\processed")
 OUT_PATH = PROCESSED_DIR / "combined_quarterly.csv"
 
 # ---------------------------------------------------------------------------
-# Headline metrics, each mapped to its aggregation rule for monthly -> quarterly
+# Headline metrics → aggregation rule (monthly → quarterly)
 # ---------------------------------------------------------------------------
-
 RTT_METRICS = {
     "Incomplete RTT pathways - % within 18 weeks": "mean",
     "Incomplete RTT pathways - Median wait (weeks)": "mean",
@@ -88,6 +86,7 @@ GP_METRICS = {
 }
 
 WORKFORCE_METRICS = {
+    # For workforce FTE, take the last value in the quarter (snapshot at quarter end)
     "FTE: All staff groups - All staff groups": "last",
     "FTE: Professionally qualified clinical staff - All staff groups": "last",
     "FTE: Professionally qualified clinical staff - Nurses & health visitors": "last",
@@ -107,14 +106,21 @@ BEDS_METRIC = "total_occupied_beds_overnight"
 
 
 def _quarter_label(date: pd.Series) -> pd.Series:
-    """Map any date onto its calendar-quarter start date (e.g. a date in
-    May 2024 -> 2024-04-01). Used as the common key across all sources."""
+    """
+    Map every date onto the start of its calendar quarter.
+    Example: 2024‑05‑15 → 2024‑04‑01.
+    This becomes the common key across all sources.
+    """
     return date.dt.to_period("Q").dt.to_timestamp()
 
 
 def resample_monthly_source(path: Path, metric_aggs: dict, source_label: str) -> pd.DataFrame:
-    """Filter to the given metrics, then resample monthly -> quarterly using
-    a per-metric aggregation rule (sum / mean / last)."""
+    """
+    Filter a cleaned monthly CSV to the given metrics, then resample to
+    quarterly using the per‑metric aggregation rule.
+
+    Returns an empty DataFrame (with the right columns) if no metrics match.
+    """
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df[df["metric"].isin(metric_aggs.keys())].copy()
@@ -136,8 +142,10 @@ def resample_monthly_source(path: Path, metric_aggs: dict, source_label: str) ->
 
 
 def resample_beds(path: Path) -> pd.DataFrame:
-    """Beds is already quarterly - just align snapshot dates onto quarter
-    start labels so they line up with the resampled sources."""
+    """
+    Bed occupancy data is already quarterly – just align snapshot dates
+    onto quarter‑start labels so they line up with the other sources.
+    """
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["quarter"] = _quarter_label(df["date"])
@@ -147,8 +155,11 @@ def resample_beds(path: Path) -> pd.DataFrame:
 
 def expand_annual_to_quarters(path: Path, value_col: str, metric_name: str,
                                quarters_index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Forward-fill an annual series across the quarters of its year. This
-    is an approximation - flag it in your methodology write-up."""
+    """
+    Forward‑fill an annual series (e.g. population) across the quarters
+    of each year.  This is a real methodological approximation – flag it
+    in your write‑up.
+    """
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.set_index("date")[[value_col]].rename(columns={value_col: "value"}).sort_index()
@@ -161,8 +172,10 @@ def expand_annual_to_quarters(path: Path, value_col: str, metric_name: str,
 
 
 def expand_pesa_to_quarters(path: Path, quarters_index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Same forward-fill approach as population, applied per metric since
-    PESA keeps its full, unfiltered COFOG breakdown."""
+    """
+    Same forward‑fill logic as population, but applied per metric because
+    PESA retains its full COFOG breakdown.
+    """
     df = pd.read_csv(path)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
@@ -179,46 +192,23 @@ def expand_pesa_to_quarters(path: Path, quarters_index: pd.DatetimeIndex) -> pd.
 
 def add_quadratic_trend(df, date_col='quarter'):
     """
-    Add quadratic trend variable for series with significant curvature.
-    Centered and scaled to reduce multicollinearity.
-    
-    Parameters
-    ----------
-    df : DataFrame
-        Must have a date column (default: 'quarter')
-    date_col : str
-        Name of the date column
-        
-    Returns
-    -------
-    DataFrame with 'quadratic_trend' column added
+    Add a quadratic trend variable (centred and scaled) to reduce
+    multicollinearity when a quadratic term is used in later models.
     """
-    # Get unique quarters sorted
     unique_quarters = sorted(df[date_col].unique())
     n = len(unique_quarters)
-    
-    # Create time index (0 to n-1) for the full timeline
     t = np.arange(n)
-    
-    # Center the time variable to reduce multicollinearity
     t_centered = t - np.mean(t)
-    
-    # Quadratic trend (centered and scaled to unit variance)
     quadratic = (t_centered ** 2)
     quadratic_scaled = quadratic / np.std(quadratic) if np.std(quadratic) > 0 else quadratic
-    
-    # Create mapping from quarter to quadratic trend value
     quarter_to_quadratic = {q: val for q, val in zip(unique_quarters, quadratic_scaled)}
-    
-    # Add column to dataframe
     df['quadratic_trend'] = df[date_col].map(quarter_to_quadratic)
-    
     print(f"  ✓ Added quadratic_trend column ({n} quarters, range: {df['quadratic_trend'].min():.3f} → {df['quadratic_trend'].max():.3f})")
-    
     return df
 
 
 def main():
+    """Run the full alignment and merging process."""
     print("Aligning all sources to quarterly frequency...\n")
 
     rtt = resample_monthly_source(PROCESSED_DIR / "rtt_clean.csv", RTT_METRICS, "RTT")
@@ -236,10 +226,13 @@ def main():
     beds = resample_beds(PROCESSED_DIR / "beds_clean.csv")
     beds["source"] = "Beds"
 
-    # Master quarterly calendar = union of every quarter present in the
-    # monthly/quarterly sources, so annual sources can be forward-filled
-    # onto all of them.
-    all_quarters = pd.concat([rtt["quarter"], ae["quarter"], gp["quarter"], workforce["quarter"], beds["quarter"]])
+    # Build a master quarterly calendar from the union of all quarters in the
+    # monthly/quarterly sources so annual sources can be forward‑filled onto
+    # all of them.
+    all_quarters = pd.concat(
+        [rtt["quarter"], ae["quarter"], gp["quarter"],
+         workforce["quarter"], beds["quarter"]]
+    )
     quarters_index = pd.DatetimeIndex(sorted(all_quarters.dropna().unique()))
 
     population = expand_annual_to_quarters(
@@ -256,22 +249,28 @@ def main():
     print(f"\nCombined data: {len(combined)} rows, {combined['metric'].nunique()} metrics")
     print(f"Quarter range: {combined['quarter'].min()} → {combined['quarter'].max()}")
 
-    # ADD: Add quadratic_trend (and placeholder COVID dummies)
-    # This MUST be done BEFORE saving
+    # ----- Add exogenous variables (quadratic trend and ITS placeholders) -----
     print("\nAdding exogenous variables...")
     combined = add_quadratic_trend(combined, 'quarter')
-    
-    # Add placeholder columns for COVID dummies (they'll be overwritten by add_intervention_dummies.py)
-    # But we need them to exist in the CSV
+
+    # Placeholder columns – will be properly populated by add_intervention_dummies.py
     combined['covid_pulse'] = 0
     combined['post_covid_regime'] = 0
     combined['post_covid_trend_break'] = 0
 
-    # Verify quadratic_trend was added
+    # ---------- ITS design: linear time index and slope‑change interaction ----------
+    combined = combined.sort_values('quarter')
+    quarters = sorted(combined['quarter'].unique())
+    t_map = {q: i+1 for i, q in enumerate(quarters)}
+    combined['t'] = combined['quarter'].map(t_map)
+    # The interaction term will be computed correctly once post_covid_trend_break
+    # is updated by add_intervention_dummies.py.
+    combined['post_covid_slope_change'] = combined['post_covid_trend_break'] * combined['t']
+
     if 'quadratic_trend' in combined.columns:
         print(f"  ✓ quadratic_trend column present (range: {combined['quadratic_trend'].min():.3f} → {combined['quadratic_trend'].max():.3f})")
     else:
-        print("  ❌ ERROR: quadratic_trend column NOT added!")
+        print("ERROR: quadratic_trend column NOT added!")
         return
 
     combined.to_csv(OUT_PATH, index=False)
@@ -279,7 +278,6 @@ def main():
     print(f"  {len(combined)} rows, {combined['metric'].nunique()} metrics")
     print(f"  Columns: {combined.columns.tolist()}")
 
-    # Flag sources with much shorter coverage than the overall range
     print("\nCoverage per source:")
     for src, sub in combined.groupby("source"):
         print(f"  {src:<18} {sub['quarter'].min()} → {sub['quarter'].max()}")

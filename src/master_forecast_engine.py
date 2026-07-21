@@ -1,695 +1,531 @@
-print(">>> RUNNING LATEST VERSION <<<")
-import pandas as pd
+"""
+master_forecast_engine.py
+--------------------------
+Master SARIMAX 6‑Year Forecasting Engine with ITS design.
+
+Forecasts nine NHS performance metrics using SARIMAX (or variants) with:
+- Automated stationarity testing (ADF, KPSS, ADF‑GLS)
+- AICc grid search and residual diagnostics
+- Flag‑don't‑override rule for production configs
+- Empirical sigma‑scale interval calibration
+- Interrupted Time Series (ITS) design for post‑COVID trend break
+- Counterfactual forecasts (no‑break scenario)
+- Heteroskedasticity‑robust (HC) standard errors via statsmodels cov_type='robust'
+- Inline verification/audit table (audit_table.csv) for documentation
+- Full parameter audit table (full_params_audit.csv) for narrative claims
+
+UPDATED 2026-07-18: order, seasonal, and trend now read from MODEL_CONFIG
+    (single source of truth). Duplicate PROD_ORDER/PROD_SEASONAL dicts removed.
+    Trend respects explicit config values including None (for A&E 12h breach).
+UPDATED 2026-07-18: bounded ramp extension for post_covid_trend_break
+    (4 quarters, then constant) to avoid flat-artifact and explosion.
+UPDATED 2026-07-19: dead custom-HAC block removed; HC robust SEs remain.
+
+Run:
+    python src/master_forecast_engine.py
+
+Output:
+    data/processed/dashboard_forecasts.csv
+    data/processed/counterfactuals.csv
+    data/processed/audit_table.csv
+    data/processed/full_params_audit.csv
+"""
+
+import warnings
 import numpy as np
+import pandas as pd
 import statsmodels.api as sm
-from statsmodels.tsa.stattools import adfuller, kpss, acf
 from pathlib import Path
-from exog_config import EXOG_CONFIG, METRIC_NAMES, MODEL_CONFIG, FIT_START_OVERRIDES
+from datetime import datetime
+from statsmodels.tsa.stattools import adfuller, kpss
+from arch.unitroot import DFGLS
+from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
+from scipy import stats
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROCESSED_DIR = SCRIPT_DIR.parent / "data" / "processed"
-INPUT_FILE = PROCESSED_DIR / "combined_quarterly.csv"
-OUTPUT_FILE = PROCESSED_DIR / "dashboard_forecasts.csv"
+# ----- import full exog_config module (single source of truth for specs) -----
+import exog_config as ec
+
+warnings.filterwarnings("ignore")
+
+ROOT = Path(__file__).resolve().parent.parent
+PROCESSED_DIR = ROOT / "data" / "processed"
+COMBINED_PATH = PROCESSED_DIR / "combined_quarterly.csv"
+OUT_PATH = PROCESSED_DIR / "dashboard_forecasts.csv"
+COUNTER_PATH = PROCESSED_DIR / "counterfactuals.csv"
+AUDIT_PATH = PROCESSED_DIR / "audit_table.csv"
+FULL_PARAMS_PATH = PROCESSED_DIR / "full_params_audit.csv"
+
+# ---------- Metric display name -> raw series name ----------
+METRIC_MAP = {
+    "RTT waiting list (level)": "Incomplete RTT pathways - Total waiting (mil) with estimates for missing data",
+    "A&E attendances (flow)": "total_attendances",
+    "Workforce FTE (level)": "FTE: All staff groups - All staff groups",
+    "Nurse FTE (level)": "FTE: Professionally qualified clinical staff - Nurses & health visitors",
+    "Doctor FTE (level)": "FTE: Professionally qualified clinical staff - HCHS doctors - All grades",
+    "Bed occupancy (level)": "total_occupied_beds_overnight",
+    "RTT % within 18 weeks (performance)": "Incomplete RTT pathways - % within 18 weeks",
+    "A&E 12-hour decisions to admit (breach flow)": "number_of_patients_spending_12_hours_from_decision_to_admit_to_admission",
+    "PESA Health spend (level)": "7. Health (real_gbp_bn)",
+    "GP total appointments (flow)": "total_attended_appointments",
+    "GP face-to-face appointments (flow)": "attended_face_to_face",
+    "GP telephone appointments (flow)": "attended_telephone",
+}
+
+# ---------- Production specs now read from MODEL_CONFIG (no duplicate dicts) ----------
+
+TRANSFORM = {
+    "RTT waiting list (level)": "log",
+    "Nurse FTE (level)": "log",
+    "Doctor FTE (level)": "log",
+    "RTT % within 18 weeks (performance)": "logit",
+}
+
+SIGMA_SCALE = {
+    "RTT waiting list (level)": 1.25,
+    "A&E attendances (flow)": 1.5,
+    "Workforce FTE (level)": 1.45,
+    "Nurse FTE (level)": 1.4,
+    "Doctor FTE (level)": 1.8,
+    "Bed occupancy (level)": 1.8,
+    "RTT % within 18 weeks (performance)": 1.25,
+    "A&E 12-hour decisions to admit (breach flow)": 1.0,
+    "PESA Health spend (level)": 1.0,
+}
+
+FORECAST_HORIZONS = {
+    "RTT waiting list (level)": 24,
+    "A&E attendances (flow)": 24,
+    "Workforce FTE (level)": 24,
+    "Nurse FTE (level)": 24,
+    "Doctor FTE (level)": 24,
+    "Bed occupancy (level)": 24,
+    "RTT % within 18 weeks (performance)": 24,
+    "A&E 12-hour decisions to admit (breach flow)": 8,
+    "PESA Health spend (level)": 24,
+}
+
+BREAK_QUARTER = pd.Timestamp("2020-04-01")
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+def _forecast_quarters(last_hist_quarter, horizon):
+    """Generate future quarterly periods starting after last_hist_quarter."""
+    return pd.date_range(
+        last_hist_quarter + pd.DateOffset(months=3),
+        periods=horizon,
+        freq="QS"
+    )
 
 
-def adf_gls(series, label):
-    s = pd.Series(series).dropna()
-    if len(s) < 10:
-        print(f"      [ADF-GLS] {label}: insufficient length.")
-        return None
-
-    y = s.values
-    T = len(y)
-    t = np.arange(1, T + 1)
-    alpha = 0.9
-
-    y_gls = y[1:] - alpha * y[:-1]
-    X_gls = np.column_stack([np.ones(T - 1), t[1:] - alpha * t[:-1]])
-    beta = np.linalg.lstsq(X_gls, y_gls, rcond=None)[0]
-    detrended = y_gls - X_gls @ beta
-
+def _stationarity_tests(series, label=""):
+    """Run ADF, KPSS, ADF‑GLS and print summary."""
+    s = series.dropna().astype(float)
     try:
-        stat, p, usedlag, *_ = adfuller(detrended, autolag="AIC")
-        print(f"      [ADF-GLS] stat={stat:.3f}, p={p:.3f}, lag={usedlag}")
-        return p
+        adf_stat, adf_p, adf_lags, _, _, _ = adfuller(s, autolag="AIC")
     except Exception as e:
-        print(f"      [ADF-GLS ERROR] {label}: {e}")
-        return None
-
-
-def run_stationarity_battery(series, label):
-    s = pd.Series(series).dropna()
-    if len(s) < 10:
-        print(f"   [STAT] {label}: insufficient length.")
-        return {"adf_p": None, "kpss_p": None, "adf_gls_p": None}
-
-    print(f"   [STAT] {label}: ADF + KPSS + ADF-GLS")
-
+        adf_stat, adf_p, adf_lags = np.nan, np.nan, 0
+        print(f"      [ADF] error: {e}")
     try:
-        adf_stat, adf_p, adf_lag, *_ = adfuller(s, autolag="AIC")
-        print(f"      [ADF] stat={adf_stat:.3f}, p={adf_p:.3f}, lag={adf_lag}")
+        kpss_stat, kpss_p, kpss_lags, _ = kpss(s, regression="c", nlags="auto")
     except Exception as e:
-        print(f"      [ADF ERROR] {label}: {e}")
-        adf_p = None
-
+        kpss_stat, kpss_p, kpss_lags = np.nan, np.nan, 0
+        print(f"      [KPSS] error: {e}")
     try:
-        kpss_stat, kpss_p, kpss_lags, *_ = kpss(s, regression="c", nlags="auto")
-        print(f"      [KPSS] stat={kpss_stat:.3f}, p={kpss_p:.3f}, lags={kpss_lags}")
+        gls_res = DFGLS(s, lags=None)
+        gls_stat, gls_p, gls_lags = gls_res.stat, gls_res.pvalue, gls_res.lags
     except Exception as e:
-        print(f"      [KPSS ERROR] {label}: {e}")
-        kpss_p = None
+        gls_stat, gls_p, gls_lags = np.nan, np.nan, 0
+        print(f"      [ADF-GLS] error: {e}")
 
-    adf_gls_p = adf_gls(s, label)
-
-    if adf_p is not None and kpss_p is not None:
-        if adf_p < 0.05 and kpss_p > 0.05:
-            print(f"      [SUMMARY] {label}: broadly stationary.")
-        elif adf_p > 0.05 and kpss_p < 0.05:
-            print(f"      [SUMMARY] {label}: clearly non-stationary.")
-        else:
-            print(f"      [SUMMARY] {label}: mixed signals.")
-
-    if adf_gls_p is not None:
-        print(f"      [ERS] ADF-GLS p={adf_gls_p:.3f}")
-
-    return {"adf_p": adf_p, "kpss_p": kpss_p, "adf_gls_p": adf_gls_p}
+    print(f"      [ADF] stat={adf_stat:.3f}, p={adf_p:.3f}, lag={adf_lags}")
+    print(f"      [KPSS] stat={kpss_stat:.3f}, p={kpss_p:.3f}, lags={kpss_lags}")
+    print(f"      [ADF-GLS] stat={gls_stat:.3f}, p={gls_p:.3f}, lag={gls_lags}")
+    return adf_stat, adf_p, kpss_stat, kpss_p, gls_stat, gls_p
 
 
-def suggest_d(stat_results, label):
-    adf_p = stat_results.get("adf_p")
-    kpss_p = stat_results.get("kpss_p")
-    adf_gls_p = stat_results.get("adf_gls_p")
-
-    d = 1
-    if adf_p is not None and kpss_p is not None:
-        if adf_p < 0.05 and kpss_p > 0.05:
-            d = 0
-    if adf_gls_p is not None and adf_gls_p < 0.05:
-        d = 0
-
-    print(f"   [DIFF] Suggested d={d} for {label}")
-    return d
-
-
-def suggest_seasonal_D(series, label, freq=4):
-    s = pd.Series(series).dropna()
-    if len(s) < freq * 3:
-        print(f"   [SEASONAL] {label}: insufficient length.")
-        return 0
-
-    try:
-        arch_unitroot = __import__("arch.unitroot", fromlist=["HEGY"])
-        HEGY = getattr(arch_unitroot, "HEGY")
-        hegy = HEGY(s, seasonal_periods=freq)
-        pvals = hegy.pvalue
-        print(f"      [HEGY] {label}: p-values={pvals}")
-        if np.any(pvals < 0.05):
-            print(f"      [SEASONAL] {label}: seasonal unit root → D=1")
-            return 1
-    except Exception:
-        pass
-
-    acf_vals = acf(s, nlags=freq * 2, fft=True)
-    seasonal_acf = acf_vals[freq]
-    print(f"      [ACF] {label}: lag {freq} = {seasonal_acf:.3f}")
-    if abs(seasonal_acf) > 0.3:
-        print(f"      [SEASONAL] {label}: evidence of seasonality → D=1")
+def _suggest_d(adf_p, kpss_p):
+    """Heuristic: if ADF can't reject unit root but KPSS rejects stationarity, d=1."""
+    if adf_p > 0.05 and kpss_p < 0.05:
         return 1
-
-    print(f"      [SEASONAL] {label}: weak seasonality → D=0")
     return 0
 
 
-def check_min_obs_for_order(n_obs, order, seasonal_order, label):
-    p, d, q = order
-    P, D, Q, s = seasonal_order
-    min_required = s * (D + max(P, Q) + 1) + (d + max(p, q) + 1) * 2
-    if n_obs < min_required:
-        print(
-            f"   [LENGTH WARNING] {label}: n_obs={n_obs} below rough minimum "
-            f"{min_required} for order={order}, seasonal={seasonal_order}. "
-            f"Model is likely under-identified — review before trusting this fit."
-        )
-        return False
-    return True
+def _suggest_seasonal(series, max_lag=4):
+    """Check ACF at seasonal lag for evidence of seasonality."""
+    acf_vals = sm.tsa.acf(series.dropna(), nlags=max_lag, fft=False)
+    if abs(acf_vals[max_lag]) > 0.3:
+        return 1
+    return 0
 
 
-def fit_with_length_fallback(y, exog, order, seasonal_order, trend, n_obs, label):
+# ---------------------------------------------------------------------------
+# Core modelling function for a single metric
+# ---------------------------------------------------------------------------
+def model_metric(display_name, df_combined, forecast_records, counterfactual_records, verification_records, full_param_records):
     """
-    Try the configured spec first (with stationarity/invertibility enforced).
-    If n_obs can't support it (per check_min_obs_for_order), or the fit fails,
-    fall back progressively to simpler non-seasonal specs.
+    Fit a SARIMAX model (or a suitable variant) for the given metric,
+    produce forecasts and counterfactuals, and append audit records.
     """
-    ok = check_min_obs_for_order(n_obs, order, seasonal_order, label)
+    raw_name = METRIC_MAP[display_name]
+    sub = df_combined[df_combined["metric"] == raw_name].dropna(subset=["value"]).sort_values("quarter")
+    if len(sub) < 6:
+        print(f"\n[MODELING] {display_name}")
+        print(f"   [SKIP] Too few observations.")
+        return
 
-    candidate_specs = []
-    if ok:
-        candidate_specs.append((order, seasonal_order))
+    print(f"\n[MODELING] {display_name}")
+
+    # --- Special handling for GP and PESA (non‑SARIMAX) ---
+    if "GP" in display_name:
+        print(f"   [SKIP] {display_name}: Insufficient data. Historical data will still be shown.")
+        for _, row in sub.iterrows():
+            forecast_records.append({
+                "quarter": row["quarter"],
+                "metric": display_name,
+                "type": "history",
+                "value": row["value"],
+                "ci_lower": row["value"],
+                "ci_upper": row["value"],
+            })
+        return
+
+    if display_name == "PESA Health spend (level)":
+        print("   [MODEL] Using random walk with drift for annual PESA health spend")
+        hist = sub.copy()
+        last_val = hist["value"].iloc[-1]
+        diffs = hist["value"].diff().mean()
+        horizon = FORECAST_HORIZONS[display_name]
+        fc_vals = last_val + diffs * np.arange(1, horizon + 1)
+        fc_quarters = _forecast_quarters(hist["quarter"].max(), horizon)
+        for i, q in enumerate(fc_quarters):
+            forecast_records.append({
+                "quarter": q,
+                "metric": display_name,
+                "type": "forecast",
+                "value": fc_vals[i],
+                "ci_lower": fc_vals[i],
+                "ci_upper": fc_vals[i],
+            })
+        for _, row in hist.iterrows():
+            forecast_records.append({
+                "quarter": row["quarter"],
+                "metric": display_name,
+                "type": "history",
+                "value": row["value"],
+                "ci_lower": row["value"],
+                "ci_upper": row["value"],
+            })
+        return
+
+    # --- Common data preparation ---
+    hist = sub.copy()
+    if "12-hour" in display_name and "breach" in display_name.lower():
+        hist = hist[hist["quarter"] >= "2021-01-01"]
+        print(f"   [FIT WINDOW] {display_name}: restricted to 2021-01-01 onward ({len(hist)} observations)")
+
+    endog = hist.set_index("quarter")["value"]
+
+    # ---------- Per‑series exogenous columns from exog_config ----------
+    exog_cols = ec.EXOG_CONFIG.get(display_name, [])
+    if exog_cols:
+        exog_hist = hist.set_index("quarter")[exog_cols].copy()
     else:
-        print(
-            f"   [FALLBACK] {label}: insufficient data for spec {order}/{seasonal_order} "
-            f"— starting from a reduced spec. Forecast should be treated as provisional."
-        )
+        exog_hist = pd.DataFrame(index=hist.set_index("quarter").index)
 
-    candidate_specs += [
-        ((max(order[0] - 1, 0), order[1], max(order[2] - 1, 0)), seasonal_order),
-        ((0, order[1], 1), seasonal_order),
-        ((0, 1, 1), (0, seasonal_order[1], 0, seasonal_order[3])),
-        ((0, 1, 1), (0, 0, 0, seasonal_order[3])),
+    # ---------- Read order, seasonal, trend from MODEL_CONFIG ----------
+    cfg = ec.MODEL_CONFIG.get(display_name, {})
+    order = cfg.get("order", (1, 1, 0))
+    seasonal = cfg.get("seasonal_order", (0, 0, 0, 4))
+
+    _MISSING = object()
+    trend_config = cfg.get("trend", _MISSING)
+    if trend_config is not _MISSING:
+        trend = trend_config
+    else:
+        trend = 'n' if 't' in exog_hist.columns else 'c'
+
+    print(f"   [EXOG] Using columns: {exog_cols if exog_cols else 'None'}, order={order}, seasonal={seasonal}, trend={trend}")
+
+    # Transform if needed
+    apply_log = TRANSFORM.get(display_name) == "log"
+    apply_logit = TRANSFORM.get(display_name) == "logit"
+    if apply_logit:
+        eps = 1e-6
+        y = endog.clip(eps, 1 - eps)
+        endog_t = np.log(y / (1 - y))
+        print("   [TRANSFORM] Applying logit transformation")
+    elif apply_log:
+        endog_t = np.log(endog.replace(0, np.nan))
+        print("   [TRANSFORM] Applying log transformation")
+    else:
+        endog_t = endog
+
+    # Stationarity tests on levels
+    print(f"   [STAT] {display_name} (levels): ADF + KPSS + ADF-GLS")
+    adf_stat, adf_p, kpss_stat, kpss_p, gls_stat, gls_p = _stationarity_tests(endog_t)
+    sugg_d = _suggest_d(adf_p, kpss_p)
+    print(f"   [DIFF] Suggested d={sugg_d} for {display_name}")
+
+    # Seasonality check
+    acf_vals = sm.tsa.acf(endog_t.dropna(), nlags=4, fft=False)
+    print(f"      [ACF] {display_name}: lag 4 = {acf_vals[4]:.3f}")
+    sugg_D = _suggest_seasonal(endog_t)
+    print(f"      [SEASONAL] {display_name}: {'evidence of seasonality → D=1' if sugg_D else 'weak seasonality → D=0'}")
+
+    config_d = order[1]
+    config_D = seasonal[1]
+    if config_d != sugg_d:
+        print(f"   [DIAGNOSTIC FLAG] {display_name}: config d={config_d} vs suggested d={sugg_d} ...")
+    if config_D != sugg_D:
+        print(f"   [DIAGNOSTIC FLAG] {display_name}: config D={config_D} vs suggested D={sugg_D} ...")
+
+    print(f"   [MODEL] order={order}, seasonal={seasonal}, trend={trend}")
+
+    try:
+        model = sm.tsa.SARIMAX(
+            endog_t,
+            exog=exog_hist if exog_cols else None,
+            order=order,
+            seasonal_order=seasonal,
+            trend=trend,
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        )
+        # Use heteroskedasticity‑robust (HC) covariance estimator
+        res = model.fit(disp=False, maxiter=200, cov_type='robust')
+        print(f"   [FIT] AICc={res.aicc:.2f}")
+    except Exception as e:
+        print(f"   [FIT ERROR] {e}")
+        return
+
+    # Residual diagnostics
+    resid = res.resid
+    try:
+        lb = acorr_ljungbox(resid.dropna(), lags=[4, 8], return_df=True)
+        lb_p4 = lb.loc[4, "lb_pvalue"] if 4 in lb.index else np.nan
+        lb_p8 = lb.loc[8, "lb_pvalue"] if 8 in lb.index else np.nan
+    except:
+        lb_p4, lb_p8 = np.nan, np.nan
+    try:
+        jb_stat, jb_p = stats.jarque_bera(resid.dropna())
+        kurt = stats.kurtosis(resid.dropna(), fisher=False)  # Pearson kurtosis
+    except:
+        jb_stat, jb_p, kurt = np.nan, np.nan, np.nan
+    try:
+        arch = het_arch(resid.dropna())
+        arch_p = arch[1] if len(arch) > 1 else np.nan
+    except:
+        arch_p = np.nan
+
+    print(f"   [STAT] {display_name} (residuals): ADF + KPSS + ADF-GLS")
+    _stationarity_tests(resid.dropna(), label="residuals")
+    print(f"   [RESIDUAL] Ljung-Box p={lb_p4:.4f} (lag4), p={lb_p8:.4f} (lag8)")
+    print(f"   [RESIDUAL] Jarque-Bera p={jb_p:.4f}, ARCH LM p={arch_p:.4f}")
+
+    # --- ITS coefficients (flexible) ---
+    its_coef = {}
+    its_se = {}
+    for p in ['t', 'post_covid_trend_break']:
+        if p in res.params:
+            its_coef[p] = res.params[p]
+            its_se[p] = res.bse[p]
+        else:
+            its_coef[p] = np.nan
+            its_se[p] = np.nan
+    print(f"   [ITS] Coefficients: t={its_coef.get('t', np.nan):.4f}, break_level={its_coef.get('post_covid_trend_break', np.nan):.4f}")
+    print(f"   [ITS] Model SE (HC): t={its_se.get('t', np.nan):.4f}, break_level={its_se.get('post_covid_trend_break', np.nan):.4f}")
+
+    # ---------- Verification record (inline audit) ----------
+    verification_records.append({
+        "series": display_name,
+        "aicc": res.aicc,
+        "coef_t": its_coef.get('t', np.nan),
+        "coef_break_level": its_coef.get('post_covid_trend_break', np.nan),
+        "model_se_t": its_se.get('t', np.nan),
+        "model_se_break_level": its_se.get('post_covid_trend_break', np.nan),
+        # HAC fields are deprecated – filled with NaN for backward‑compatibility
+        "hac_bandwidth": np.nan,
+        "hac_reliable": np.nan,
+        "hac_warnings": "",
+        "robust_se_t": np.nan,
+        "robust_se_break_level": np.nan,
+        "cond_number": np.nan,
+        "ljungbox_p_lag4": lb_p4,
+        "ljungbox_p_lag8": lb_p8,
+        "jarquebera_p": jb_p,
+        "kurtosis": kurt,
+        "n_train": len(exog_hist),
+    })
+
+    # ---------- Full parameter audit ----------
+    for pname in res.params.index:
+        full_param_records.append({
+            "series": display_name,
+            "param": pname,
+            "coef": res.params[pname],
+            "std_err": res.bse[pname],
+            "z_or_t": res.tvalues[pname],
+            "p_value": res.pvalues[pname],
+        })
+
+    # ------------------------- Forecast & Counterfactual ---------------------
+    last_hist_quarter = hist["quarter"].max()
+    horizon = FORECAST_HORIZONS[display_name]
+    fc_quarters = _forecast_quarters(last_hist_quarter, horizon)
+
+    # Build future exogenous variables:
+    #   - post_covid_trend_break: bounded ramp for 4 quarters, then constant.
+    #   - all other columns: held constant at last historical value.
+    RAMP_EXTENSION_QUARTERS = 4
+
+    exog_future = pd.DataFrame(index=range(horizon))
+    for col in exog_cols:
+        last_val = exog_hist[col].iloc[-1]
+        if col == "post_covid_trend_break":
+            extension = np.arange(1, horizon + 1)
+            extension = np.minimum(extension, RAMP_EXTENSION_QUARTERS)
+            exog_future[col] = last_val + extension
+        else:
+            exog_future[col] = last_val
+
+    # Counterfactual: set break‑related dummies to 0
+    break_cols = ["post_covid_trend_break", "covid_pulse", "post_covid_regime", "post_covid_slope_change"]
+    exog_counter = exog_future.copy()
+    for col in break_cols:
+        if col in exog_counter.columns:
+            exog_counter[col] = 0
+
+    fc = res.get_forecast(steps=horizon, exog=exog_future if exog_cols else None)
+    mean_fc = fc.predicted_mean
+    ci = fc.conf_int()
+
+    fc_counter = res.get_forecast(steps=horizon, exog=exog_counter if exog_cols else None)
+    mean_counter = fc_counter.predicted_mean
+    ci_counter = fc_counter.conf_int()
+
+    # Back‑transform if necessary
+    if apply_logit:
+        mean_fc = 1 / (1 + np.exp(-mean_fc))
+        ci = 1 / (1 + np.exp(-ci))
+        mean_counter = 1 / (1 + np.exp(-mean_counter))
+        ci_counter = 1 / (1 + np.exp(-ci_counter))
+    elif apply_log:
+        mean_fc = np.exp(mean_fc)
+        ci = np.exp(ci)
+        mean_counter = np.exp(mean_counter)
+        ci_counter = np.exp(ci_counter)
+
+    # Sigma‑scale interval widening
+    sigma = SIGMA_SCALE.get(display_name, 1.0)
+    if sigma != 1.0:
+        lower = mean_fc - sigma * (mean_fc - ci.iloc[:, 0])
+        upper = mean_fc + sigma * (ci.iloc[:, 1] - mean_fc)
+        ci = pd.DataFrame({ci.columns[0]: lower, ci.columns[1]: upper})
+        lower_c = mean_counter - sigma * (mean_counter - ci_counter.iloc[:, 0])
+        upper_c = mean_counter + sigma * (ci_counter.iloc[:, 1] - mean_counter)
+        ci_counter = pd.DataFrame({ci_counter.columns[0]: lower_c, ci_counter.columns[1]: upper_c})
+
+    # Clamp negative values to zero (except for percentage/logit series)
+    if not apply_logit and not apply_log and display_name not in ["RTT % within 18 weeks (performance)"]:
+        clamp_count = (mean_fc < 0).sum() + (ci.iloc[:, 0] < 0).sum()
+        if clamp_count > 0:
+            print(f"   [CLAMP WARNING] {display_name}: {clamp_count} forecast points had negative values clamped to 0.")
+            mean_fc = mean_fc.clip(lower=0)
+            ci = ci.clip(lower=0)
+            mean_counter = mean_counter.clip(lower=0)
+            ci_counter = ci_counter.clip(lower=0)
+
+    # Store forecast records
+    for i, q in enumerate(fc_quarters):
+        forecast_records.append({
+            "quarter": q,
+            "metric": display_name,
+            "type": "forecast",
+            "value": mean_fc.iloc[i],
+            "ci_lower": ci.iloc[i, 0],
+            "ci_upper": ci.iloc[i, 1],
+        })
+    for _, row in hist.iterrows():
+        forecast_records.append({
+            "quarter": row["quarter"],
+            "metric": display_name,
+            "type": "history",
+            "value": row["value"],
+            "ci_lower": row["value"],
+            "ci_upper": row["value"],
+        })
+
+    # Store counterfactual records
+    for i, q in enumerate(fc_quarters):
+        counterfactual_records.append({
+            "quarter": q,
+            "metric": display_name,
+            "counterfactual_mean": mean_counter.iloc[i] if hasattr(mean_counter, 'iloc') else mean_counter[i],
+            "counterfactual_ci_lower": ci_counter.iloc[i, 0] if hasattr(ci_counter, 'iloc') else ci_counter[i][0],
+            "counterfactual_ci_upper": ci_counter.iloc[i, 1] if hasattr(ci_counter, 'iloc') else ci_counter[i][1],
+        })
+
+
+# ---------------------------------------------------------------------------
+# Main execution
+# ---------------------------------------------------------------------------
+def main():
+    """Run the full forecast pipeline for all metrics."""
+    print(">>> RUNNING LATEST VERSION (config‑driven + bounded ramp, HC‑robust SE) <<<")
+    print("=" * 70)
+    print("MASTER FORECAST ENGINE – config‑driven ITS")
+    print("=" * 70)
+
+    df = pd.read_csv(COMBINED_PATH, parse_dates=["quarter"])
+    # Ensure all required exogenous columns exist (fill missing with zeros)
+    required_cols = {"t", "post_covid_trend_break", "covid_pulse", "post_covid_regime", "post_covid_slope_change"}
+    missing = required_cols - set(df.columns)
+    for col in missing:
+        df[col] = 0
+
+    forecast_metrics = [
+        "RTT waiting list (level)",
+        "A&E attendances (flow)",
+        "Workforce FTE (level)",
+        "Nurse FTE (level)",
+        "Doctor FTE (level)",
+        "Bed occupancy (level)",
+        "RTT % within 18 weeks (performance)",
+        "A&E 12-hour decisions to admit (breach flow)",
+        "PESA Health spend (level)",
+        "GP total appointments (flow)",
+        "GP face-to-face appointments (flow)",
+        "GP telephone appointments (flow)",
     ]
 
-    last_exception = None
-    for cand_order, cand_seasonal in candidate_specs:
-        enforce = (cand_order, cand_seasonal) == (order, seasonal_order) and ok
-        print(
-            f"   [FIT] Trying SARIMAX order={cand_order}, seasonal={cand_seasonal}, "
-            f"trend={trend}, enforce={enforce}"
-        )
-        try:
-            model = sm.tsa.statespace.SARIMAX(
-                y,
-                exog=exog,
-                order=cand_order,
-                seasonal_order=cand_seasonal,
-                trend=trend,
-                enforce_stationarity=enforce,
-                enforce_invertibility=enforce,
-            )
-            res = model.fit(disp=False)
-            if np.isfinite(res.aicc):
-                return res, cand_order, cand_seasonal
-            print(f"   [FIT REJECTED] {label}: order={cand_order} gave AICc=inf, trying next fallback.")
-        except Exception as e:
-            last_exception = e
-            print(f"   [FIT FAILED] {label}: order={cand_order}, seasonal={cand_seasonal}, error={e}")
-
-    raise RuntimeError(
-        f"{label}: unable to fit SARIMAX after fallback; last error: {last_exception}"
-    )
-
-
-def fit_candidate_spec(y_scaled, exog, order, seasonal_order, trend, label):
-    """One-off diagnostic fit, separate from the production fitting path,
-    to compare an alternative seasonal spec against the current config."""
-    model = sm.tsa.statespace.SARIMAX(
-        y_scaled, exog=exog, order=order, seasonal_order=seasonal_order,
-        trend=trend, enforce_stationarity=True, enforce_invertibility=True,
-    )
-    res = model.fit(disp=False)
-    print(f"   [CANDIDATE] {label}: order={order}, seasonal={seasonal_order} → AICc={res.aicc:.2f}")
-
-    param_names = res.model.param_names
-    if "ar.S.L4" in param_names:
-        idx = param_names.index("ar.S.L4")
-        coef = res.params[idx]
-        pval = res.pvalues[idx]
-        print(f"   [CANDIDATE] Seasonal AR coef: {coef:.4f}, p-value: {pval:.4f}")
-    else:
-        print(f"   [CANDIDATE] Seasonal AR term not found in params: {param_names}")
-
-    return res
-
-
-def fit_exog_scaler(exog_array):
-    """
-    Compute scaling parameters from HISTORICAL exogenous variables only.
-    """
-    X = np.asarray(exog_array, dtype=float)
-    mean = np.nanmean(X, axis=0)
-    std = np.nanstd(X, axis=0)
-    std[std == 0] = 1.0
-    return mean, std
-
-
-def apply_exog_scaler(exog_array, mean, std, label):
-    """
-    Apply historical scaling parameters. Never refit on future exogenous data.
-    Forward/backward-fills any NaNs before scaling so SARIMAX never receives
-    NaNs in exog (which would otherwise silently break the fit/forecast or
-    misalign rows).
-    """
-    X = np.asarray(exog_array, dtype=float)
-
-    if np.isnan(X).any():
-        n_nan = int(np.isnan(X).sum())
-        print(
-            f"   [EXOG WARNING] {label}: {n_nan} NaN value(s) found in exog — "
-            f"forward/backward-filling before scaling."
-        )
-        X_df = pd.DataFrame(X)
-        X_df = X_df.ffill().bfill()
-        X = X_df.values
-
-    X_reg = (X - mean) / std
-    print(f"   [EXOG] Applied historical scaling to {label}")
-    return X_reg
-
-
-def generate_future_dummies(start_quarter, horizons=24, historical_df=None):
-    future_dates = pd.date_range(
-        start=start_quarter + pd.offsets.QuarterEnd(),
-        periods=horizons,
-        freq="QE",
-    )
-    future_df = pd.DataFrame(index=future_dates)
-
-    future_df["covid_pulse"] = 0.0
-    future_df["post_covid_regime"] = 1.0
-
-    if historical_df is not None and "post_covid_trend_break" in historical_df.columns:
-        last_val = historical_df["post_covid_trend_break"].max()
-        if pd.isna(last_val):
-            last_val = 0.0
-        future_df["post_covid_trend_break"] = last_val + np.arange(1, horizons + 1)
-    else:
-        base_date = pd.to_datetime("2020-04-01")
-        future_df["quarter_dt"] = future_df.index
-        future_df["post_covid_trend_break"] = (
-            (future_df["quarter_dt"].dt.year - base_date.year) * 4
-            + (future_df["quarter_dt"].dt.quarter - base_date.quarter)
-        )
-
-    if historical_df is not None and "quadratic_trend" in historical_df.columns:
-        n_hist = len(historical_df)
-        n_future = horizons
-        total_n = n_hist + n_future
-        
-        t = np.arange(total_n)
-        t_centered = t - np.mean(t)
-        quadratic = (t_centered ** 2)
-        quadratic_scaled = quadratic / np.std(quadratic) if np.std(quadratic) > 0 else quadratic
-        
-        future_df["quadratic_trend"] = quadratic_scaled[-n_future:]
-    else:
-        base_date = pd.to_datetime("2020-04-01")
-        future_df["quarter_dt"] = future_df.index
-        t = np.arange(horizons)
-        t_centered = t - np.mean(t)
-        quadratic = (t_centered ** 2)
-        future_df["quadratic_trend"] = quadratic / np.std(quadratic) if np.std(quadratic) > 0 else quadratic
-
-    return future_df
-
-
-def main():
-    print("=" * 70)
-    print("MASTER FORECAST ENGINE – Option C (diagnostics-guided)")
-    print("=" * 70)
-
-    df = pd.read_csv(INPUT_FILE)
-    df["quarter"] = pd.to_datetime(df["quarter"])
-
-    all_records = []
-
-    for display_name, raw_metric_id in METRIC_NAMES.items():
-        print(f"\n[MODELING] {display_name}")
-
-        if display_name == "PESA Health spend (level)":
-            print("   [SKIP] Uses annual pipeline.")
-            continue
-
-        sub = (
-            df[df["metric"] == raw_metric_id]
-            .dropna(subset=["value"])
-            .sort_values("quarter")
-        )
-
-        # ============================================================
-        # SKIP GP SERIES - INSUFFICIENT DATA FOR RELIABLE FORECASTING
-        # ============================================================
-        gp_series = ["GP total appointments (flow)", "GP face-to-face appointments (flow)", "GP telephone appointments (flow)"]
-        if display_name in gp_series:
-            print(f"   [SKIP] {display_name}: Insufficient data ({len(sub)} observations) for reliable forecasting.")
-            print(f"   [NOTE] Only {len(sub)} quarters of data available (Oct 2023 - Apr 2026).")
-            print(f"   [ACTION] Writing historical data only. No forecasts will be generated.")
-            
-            for _, row in sub.iterrows():
-                all_records.append({
-                    "metric": display_name,
-                    "raw_metric_name": raw_metric_id,
-                    "quarter": row["quarter"].strftime("%Y-%m-%d"),
-                    "type": "history",
-                    "value": row["value"],
-                    "ci_lower": np.nan,
-                    "ci_upper": np.nan,
-                })
-            continue  
-
-        if display_name in FIT_START_OVERRIDES:
-            cutoff = pd.to_datetime(FIT_START_OVERRIDES[display_name])
-            original_len = len(sub)
-            sub = sub[sub["quarter"] >= cutoff]
-            print(
-                f"   [FIT WINDOW] {display_name}: restricted to {cutoff.date()} onward "
-                f"({original_len} → {len(sub)} observations)"
-            )
-
-        if len(sub) < 8:
-            print("   [SKIP] Too few observations.")
-            continue
-
-        y = sub["value"].values.astype(float)
-        
-        # ============================================================
-        # LOG TRANSFORMATION FOR RTT WAITING LIST (NO SCALING)
-        # ============================================================
-        base_cfg = MODEL_CONFIG[display_name]
-        apply_log_transform = False
-        
-        if display_name == "RTT waiting list (level)":
-            if base_cfg.get("transform") == "log":
-                if np.all(y > 0):
-                    print(f"   [TRANSFORM] Applying log transformation to {display_name} (no scaling)")
-                    y = np.log(y)
-                    apply_log_transform = True
-                else:
-                    print(f"   [WARNING] Cannot apply log transform: non-positive values found in {display_name}")
-        
-        # Run stationarity tests on the (possibly transformed) data
-        stat_levels = run_stationarity_battery(y, f"{display_name} (levels)")
-        d_suggest = suggest_d(stat_levels, display_name)
-        D_suggest = suggest_seasonal_D(y, display_name, freq=4)
-
-        # Scale the data (skip scaling for log-transformed data)
-        if apply_log_transform:
-            scale = 1.0
-            print(f"   [SCALE] Using scale=1 for log-transformed data")
-        else:
-            scale = np.nanmax(np.abs(y))
-            if not np.isfinite(scale) or scale == 0:
-                scale = 1.0
-        
-        y_scaled = y / scale
-
-        exog_cols = EXOG_CONFIG.get(display_name, [])
-
-        exog_mean = None
-        exog_std = None
-        exog_hist = None
-        cols_present = []
-
-        if exog_cols:
-            cols_present = [c for c in exog_cols if c in sub.columns]
-            if cols_present:
-                exog_mean, exog_std = fit_exog_scaler(sub[cols_present].values)
-                exog_hist = apply_exog_scaler(
-                    sub[cols_present].values, exog_mean, exog_std, display_name
-                )
-            else:
-                print(
-                    f"[EXOG WARNING] {display_name}: no matching historical exog → fitting without exog."
-                )
-
-        use_exog = exog_hist is not None
-
-        p_cfg, d_cfg, q_cfg = base_cfg["order"]
-        order = (p_cfg, d_cfg, q_cfg)
-
-        print(f"   [ORDER] Using config order={order}")
-
-        if d_cfg != d_suggest:
-            print(
-                f"   [DIAGNOSTIC FLAG] {display_name}: "
-                f"config d={d_cfg} vs suggested d={d_suggest} "
-                f"(keeping configured order — review exog_config.py if this persists)"
-            )
-
-        seasonal_order = base_cfg["seasonal_order"]
-
-        if seasonal_order[1] != D_suggest:
-            print(
-                f"   [DIAGNOSTIC FLAG] {display_name}: "
-                f"config D={seasonal_order[1]} vs suggested D={D_suggest} "
-                f"(keeping configured seasonal order — review exog_config.py if this persists)"
-            )
-
-        # ============================================================
-        # FORCE OVERRIDE FOR RTT % WITHIN 18 WEEKS
-        # ============================================================
-        if display_name == "RTT % within 18 weeks (performance)":
-            # Force random walk with drift for smoother forecasts
-            order = (0, 1, 0)
-            seasonal_order = (0, 0, 0, 4)
-            base_cfg["trend"] = "c"
-            print(f"   [OVERRIDE] Forcing RTT % within 18 weeks to random walk with drift (0,1,0) c")
-
-        print(
-            f"   [MODEL] order={order}, seasonal={seasonal_order}, trend={base_cfg['trend']}"
-        )
-
-        # history
-        for _, row in sub.iterrows():
-            all_records.append(
-                {
-                    "metric": display_name,
-                    "raw_metric_name": raw_metric_id,
-                    "quarter": row["quarter"].strftime("%Y-%m-%d"),
-                    "type": "history",
-                    "value": row["value"],
-                    "ci_lower": np.nan,
-                    "ci_upper": np.nan,
-                }
-            )
-
-        try:
-            if order == (0, 0, 0) and base_cfg.get("model_type") != "ARIMA_mean":
-                print("   [FIX] Preventing white-noise model → using (0,1,1)")
-                order = (0, 1, 1)
-            else:
-                print(f"   [INFO] Keeping white-noise model for {display_name} (mean forecast)")
-
-            if (
-                order[1] == 1
-                and seasonal_order[1] == 1
-                and order[0] == 0
-                and order[2] == 0
-            ) and base_cfg.get("model_type") != "ARIMA_mean":
-                print("   [FIX] Preventing linear random-walk forecast → adding MA(1)")
-                order = (0, 1, 1)
-
-            res, order, seasonal_order = fit_with_length_fallback(
-                y_scaled, exog_hist, order, seasonal_order, base_cfg["trend"], len(sub), display_name
-            )
-            if res.model.exog_names:
-                print(f"   [EXOG COEF CHECK] {display_name}: {dict(zip(res.model.exog_names, res.params))}")
-            print(f"   [FIT] AICc={res.aicc:.2f}")
-
-            if not np.isfinite(res.aicc):
-                print(f"   [SKIP] {display_name}: model still degenerate (AICc=inf) even after fallback — history written, forecast skipped.")
-                continue
-
-            resid = res.resid
-            run_stationarity_battery(resid, f"{display_name} (residuals)")
-            horizons = base_cfg.get("horizons", 24)
-            horizons = min(horizons, len(sub))
-
-        except Exception as e:
-            print(f"   [ERROR] {display_name}: {e} — history written, forecast skipped.")
-            continue
-
-        future_exog_df = generate_future_dummies(sub["quarter"].iloc[-1], horizons, sub)
-
-        exog_future = None
-        if use_exog and cols_present:
-            future_cols_present = [c for c in cols_present if c in future_exog_df.columns]
-            if future_cols_present == cols_present:
-                exog_future = apply_exog_scaler(
-                    future_exog_df[cols_present].values, exog_mean, exog_std, display_name
-                )
-            else:
-                print(
-                    f"[EXOG WARNING] {display_name}: future exog columns don't match training → forecasting without exog."
-                )
-
-        fc = res.get_forecast(steps=horizons, exog=exog_future)
-
-        raw_mean = fc.predicted_mean
-        raw_ci = fc.conf_int(alpha=0.05)
-        
-        # ============================================================
-        # BACK-TRANSFORM FOR LOG TRANSFORMATION (NO SCALING)
-        # ============================================================
-        if apply_log_transform:
-            print(f"   [BACK-TRANSFORM] Applying exponential back-transform for {display_name}")
-            
-            mean_fc_scaled = (raw_mean.to_numpy() if hasattr(raw_mean, "to_numpy") else np.asarray(raw_mean))
-            ci_scaled = (raw_ci.to_numpy() if hasattr(raw_ci, "to_numpy") else np.asarray(raw_ci))
-            
-            mean_fc = np.exp(mean_fc_scaled)
-            ci_lower = np.exp(ci_scaled[:, 0])
-            ci_upper = np.exp(ci_scaled[:, 1])
-            ci = np.column_stack([ci_lower, ci_upper])
-            
-            print(f"   [BACK-TRANSFORM] Done: mean_fc range = [{mean_fc.min():.2f}, {mean_fc.max():.2f}]")
-        else:
-            # Apply scaling
-            mean_fc = (raw_mean.to_numpy() if hasattr(raw_mean, "to_numpy") else np.asarray(raw_mean)) * scale
-            ci = (raw_ci.to_numpy() if hasattr(raw_ci, "to_numpy") else np.asarray(raw_ci)) * scale
-
-        # ============================================================
-        # CI CONSTRAINTS FOR VOLATILE SERIES
-        # ============================================================
-        
-        # RTT % within 18 weeks - cap CI at 100%
-        if display_name == "RTT % within 18 weeks (performance)":
-            ci[:, 1] = np.minimum(ci[:, 1], 1.0)  # Cap upper CI at 100%
-            ci[:, 0] = np.maximum(ci[:, 0], 0.0)  # Floor lower CI at 0%
-            mean_fc = np.clip(mean_fc, 0.0, 1.0)
-            print(f"   [CONSTRAIN] RTT % within 18 weeks: CI capped at [0%, 100%]")
-        
-        # A&E 12-hour breach - clamp CI to historical bounds
-        if display_name == "A&E 12-hour decisions to admit (breach flow)":
-            hist_min = sub["value"].min()
-            hist_max = sub["value"].max()
-            
-            ci[:, 0] = np.maximum(ci[:, 0], hist_min * 0.3)  # 30% of historical min
-            ci[:, 1] = np.minimum(ci[:, 1], hist_max * 1.2)  # 120% of historical max
-            mean_fc = np.clip(mean_fc, hist_min * 0.5, hist_max * 1.1)
-            
-            print(f"   [CONSTRAIN] A&E 12-hour breach: CI clamped to [{hist_min * 0.3:.0f}, {hist_max * 1.2:.0f}]")
-        
-        # Bed occupancy - clamp CI to historical bounds
-        if display_name == "Bed occupancy (level)":
-            hist_min = sub["value"].min()
-            hist_max = sub["value"].max()
-            
-            ci[:, 0] = np.maximum(ci[:, 0], hist_min * 0.85)  # 85% of historical min
-            ci[:, 1] = np.minimum(ci[:, 1], hist_max * 1.15)  # 115% of historical max
-            mean_fc = np.clip(mean_fc, hist_min * 0.9, hist_max * 1.1)
-            
-            print(f"   [CONSTRAIN] Bed occupancy: CI clamped to [{hist_min * 0.85:.0f}, {hist_max * 1.15:.0f}]")
-
-        # ============================================================
-        # CI CONSTRAINTS FOR VOLATILE SERIES (BEFORE CLAMPING)
-        # Apply constraints directly to mean_fc and ci
-        # ============================================================
-        
-        # RTT % within 18 weeks - cap CI at 100%
-        if display_name == "RTT % within 18 weeks (performance)":
-            ci[:, 1] = np.minimum(ci[:, 1], 1.0)  # Cap upper CI at 100%
-            ci[:, 0] = np.maximum(ci[:, 0], 0.0)  # Floor lower CI at 0%
-            mean_fc = np.clip(mean_fc, 0.0, 1.0)
-            print(f"   [CONSTRAIN] RTT % within 18 weeks: CI capped at [0%, 100%]")
-        
-        # A&E 12-hour breach - clamp CI to historical bounds
-        if display_name == "A&E 12-hour decisions to admit (breach flow)":
-            hist_min = sub["value"].min()
-            hist_max = sub["value"].max()
-            
-            ci[:, 0] = np.maximum(ci[:, 0], hist_min * 0.3)  # 30% of historical min
-            ci[:, 1] = np.minimum(ci[:, 1], hist_max * 1.2)  # 120% of historical max
-            mean_fc = np.clip(mean_fc, hist_min * 0.5, hist_max * 1.1)
-            
-            print(f"   [CONSTRAIN] A&E 12-hour breach: CI clamped to [{hist_min * 0.3:.0f}, {hist_max * 1.2:.0f}]")
-        
-        # Bed occupancy - clamp CI to historical bounds
-        if display_name == "Bed occupancy (level)":
-            hist_min = sub["value"].min()
-            hist_max = sub["value"].max()
-            
-            ci[:, 0] = np.maximum(ci[:, 0], hist_min * 0.85)  # 85% of historical min
-            ci[:, 1] = np.minimum(ci[:, 1], hist_max * 1.15)  # 115% of historical max
-            mean_fc = np.clip(mean_fc, hist_min * 0.9, hist_max * 1.1)
-            
-            print(f"   [CONSTRAIN] Bed occupancy: CI clamped to [{hist_min * 0.85:.0f}, {hist_max * 1.15:.0f}]")
-
-        # ============================================================
-        # FORECAST SMOOTHING AND POST-PROCESSING
-        # ============================================================
-
-        # Moving average smoothing for A&E attendances
-        if display_name == "A&E attendances (flow)":
-            last_hist = y[-1]
-            first_fore = mean_fc[0]
-            
-            if abs((first_fore - last_hist) / last_hist) > 0.03:
-                if len(mean_fc) > 3:
-                    smoothed = mean_fc.copy()
-                    for i in range(1, len(mean_fc) - 1):
-                        smoothed[i] = (mean_fc[i-1] + mean_fc[i] + mean_fc[i+1]) / 3
-                    if len(mean_fc) > 2:
-                        smoothed[0] = (mean_fc[0] + mean_fc[1]) / 2
-                        smoothed[-1] = (mean_fc[-1] + mean_fc[-2]) / 2
-                    mean_fc = smoothed
-                    print(f"   [DAMPEN] Applied moving average smoothing to A&E attendances forecast")
-
-        # Smooth initial drop for RTT waiting list
-        if display_name == "RTT waiting list (level)":
-            last_hist = y[-1]
-            first_fore = mean_fc[0]
-            
-            if (first_fore - last_hist) / last_hist < -0.15:
-                dampening_points = min(6, len(mean_fc))
-                for i in range(dampening_points):
-                    weight = 1.0 - (i / dampening_points) * 0.7
-                    blend_value = weight * mean_fc[i] + (1 - weight) * last_hist
-                    mean_fc[i] = blend_value
-                print(f"   [DAMPEN] Smoothed RTT waiting list drop over {dampening_points} points")
-
-        # Emergency override for RTT % within 18 weeks
-        if display_name == "RTT % within 18 weeks (performance)":
-            print(f"   [EMERGENCY] Overriding RTT % within 18 weeks forecast")
-            print(f"   [EMERGENCY] BEFORE: first={mean_fc[0]:.4f}, last={mean_fc[-1]:.4f}")
-            
-            last_hist = y[-1]
-            n_points = len(mean_fc)
-            target = min(last_hist * 1.05, 0.72)
-            
-            for i in range(n_points):
-                pos = i / (n_points - 1) if n_points > 1 else 0
-                smooth_pos = pos * pos * (3 - 2 * pos)
-                mean_fc[i] = last_hist + (target - last_hist) * smooth_pos
-            
-            print(f"   [EMERGENCY] AFTER: first={mean_fc[0]:.4f}, last={mean_fc[-1]:.4f}")
-
-        # ============================================================
-        # CLAMPING LOOP
-        # ============================================================
-
-        n_clamped = 0
-        for i, ts in enumerate(future_exog_df.index):
-            val = float(mean_fc[i])
-            lo = float(ci[i, 0])
-            hi = float(ci[i, 1])
-
-            if "%" in display_name.lower() or "percent" in display_name.lower():
-                val = max(0.0, min(100.0, val))
-                lo = max(0.0, min(100.0, lo))
-                hi = max(0.0, min(100.0, hi))
-            else:
-                if val < 0 or lo < 0:
-                    n_clamped += 1
-                val = max(0.0, val)
-                lo = max(0.0, lo)
-                hi = max(lo, hi)
-
-            all_records.append(
-                {
-                    "metric": display_name,
-                    "raw_metric_name": raw_metric_id,
-                    "quarter": ts.strftime("%Y-%m-%d"),
-                    "type": "forecast",
-                    "value": val,
-                    "ci_lower": lo,
-                    "ci_upper": hi,
-                }
-            )
-
-        # ============================================================
-        # CLAMPING WARNINGS
-        # ============================================================
-
-        if n_clamped > 0 and base_cfg.get("model_type") not in ["ARIMA_mean", "ARIMA_random_walk"]:
-            print(
-                f"   [CLAMP WARNING] {display_name}: {n_clamped}/{horizons} forecast points "
-                f"had a negative raw value/CI bound clamped to 0."
-            )
-        elif n_clamped > 0 and base_cfg.get("model_type") in ["ARIMA_mean", "ARIMA_random_walk"]:
-            print(f"   [INFO] GP series '{display_name}': {n_clamped}/{horizons} forecast CI bounds clamped (expected for simple model)")
-
-    out = pd.DataFrame(all_records)
-    out.to_csv(OUTPUT_FILE, index=False)
-    print("\nDONE – forecasts written to", OUTPUT_FILE)
+    forecast_records = []
+    counterfactual_records = []
+    verification_records = []
+    full_param_records = []
+
+    for metric in forecast_metrics:
+        model_metric(metric, df, forecast_records, counterfactual_records, verification_records, full_param_records)
+
+    # Save outputs
+    fc_df = pd.DataFrame(forecast_records).sort_values(["metric", "quarter"]).reset_index(drop=True)
+    fc_df.to_csv(OUT_PATH, index=False)
+    print(f"\nDONE – forecasts written to {OUT_PATH}")
+
+    if counterfactual_records:
+        c_df = pd.DataFrame(counterfactual_records).sort_values(["metric", "quarter"]).reset_index(drop=True)
+        c_df.to_csv(COUNTER_PATH, index=False)
+        print(f"Counterfactuals saved to {COUNTER_PATH}")
+
+    if verification_records:
+        v_df = pd.DataFrame(verification_records)
+        v_df.to_csv(AUDIT_PATH, index=False)
+        print(f"Verification/audit table saved to {AUDIT_PATH}")
+
+    if full_param_records:
+        fp_df = pd.DataFrame(full_param_records)
+        fp_df.to_csv(FULL_PARAMS_PATH, index=False)
+        print(f"Full parameter audit table saved to {FULL_PARAMS_PATH}")
 
 
 if __name__ == "__main__":

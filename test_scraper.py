@@ -12,7 +12,7 @@ Usage:
 Outputs:
     Raw data files saved to data/raw/
 
-Last updated: 2026-07-02
+Last updated: 2026-07-13  (added June 2026 A&E monthly CSV alongside existing time series)
 """
 
 import sys
@@ -39,14 +39,52 @@ DIRECT_URLS = [
         "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/06/RTT-Overview-Timeseries-Including-Estimates-for-Missing-Trusts-Apr26-XLS-116K-X7gGnn.xlsx",
         None,
     ),
+    # Keep the existing cumulative time series (data through May 2026)
     (
-        "A&E Attendances",
+        "A&E Attendances (time series)",
         "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/06/Monthly-AE-Time-Series-May-2026-wlgnE2.xls",
         None,
     ),
+    # Add the new June 2026 monthly CSV for appending
     (
-        "Bed Occupancy",
-        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2024/09/KH03-Occupied-by-Spec-Overnight-only.csv",
+        "A&E June 2026 monthly",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/07/June-2026-CSV-Wfg38l.csv",
+        "AE_June_2026.csv",
+    ),
+    # Bed Occupancy – individual quarterly XLSX files (2024‑2026)
+    (
+        "Bed Occupancy Q2 2024/25",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2024/11/Beds-Open-Overnight-Web_File-Q2-2024-25.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q3 2024/25",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2025/11/Beds-Open-Overnight-Web_File-Q3-2024-25-revised.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q4 2024/25",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2025/05/Beds-Open-Overnight-Web_File-Q4-2024-25.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q1 2025/26",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2025/11/Beds-Open-Overnight-Web_File-Q1-2025-26-revised.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q2 2025/26",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2025/11/Beds-Open-Overnight-Web_File-Q2-2025-26.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q3 2025/26",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/02/Beds-Open-Overnight-Web_File-Q3-2025-26.xlsx",
+        None,
+    ),
+    (
+        "Bed Occupancy Q4 2025/26",
+        "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/05/Beds-Open-Overnight-Web_File-Q4-2025-26.xlsx",
         None,
     ),
     (

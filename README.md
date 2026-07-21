@@ -1,175 +1,130 @@
 # Health Economics Forecasting Dashboard
 
-A comprehensive forecasting pipeline for UK health system metrics including RTT waiting lists, A&E attendances, workforce FTE, bed occupancy, and GP appointments.
+A rigorous, audit‑ready forecasting pipeline for UK health system metrics,
+developed as part of a personal project portfolio. The pipeline produces
+quarterly forecasts for nine NHS performance indicators using SARIMAX models
+with an Interrupted Time Series (ITS) design, validated through rolling‑origin
+backtesting.
 
 ## Overview
 
-This dashboard provides quarterly forecasts for key NHS metrics using SARIMAX models with exogenous variables. The pipeline automatically scrapes data from NHS, ONS, and HMT sources, cleans and aligns it, and generates forecasts with confidence intervals.
+The project automates the full workflow:
+
+1. **Data ingestion** – scrapes official statistics from NHS England, NHS Digital, ONS, and HM Treasury.
+2. **Cleaning & alignment** – standardises disparate sources onto a common quarterly calendar.
+3. **Model selection & fitting** – fits SARIMAX (or logit‑ARMA / random‑walk) models with COVID‑era structural breaks, using a "flag‑don't‑override" governance rule.
+4. **Forecast & counterfactual generation** – produces 6‑year forecasts and ITS counterfactuals (what‑if without the break).
+5. **Interactive dashboard** – built with Streamlit and Plotly, displaying history, forecasts, confidence intervals, NICE QALY thresholds, and counterfactual lines.
 
 ## Features
 
-- **Automated Data Pipeline**: Scrapes, cleans, and aligns data from multiple sources
-- **SARIMAX Forecasting**: Advanced time series models with exogenous variables
-- **Interactive Dashboard**: Streamlit-based visualization with NICE policy annotations
-- **Model Diagnostics**: Comprehensive residual testing and forecast validation
-- **Flexible Configuration**: Easy to add new metrics or modify existing models
+- **Interrupted Time Series (ITS)** – formal segmented regression for post‑COVID trend breaks
+- **Heteroskedasticity‑robust standard errors** – via statsmodels' `cov_type='robust'`
+- **Rolling‑origin backtesting** – 46–69 folds per series, with Kupiec (1995) coverage tests
+- **Counterfactual analysis** – "no‑break" projections for capacity‑planning insights
+- **System Strain Overview** – single‑page summary of trends, directions, and confidence ratings
+- **Modular pipeline** – each stage can be run independently or via `run_pipeline.py`
 
-## Metrics
+## Metrics & Model Specifications
 
-| Metric | Model | Key Feature |
-|--------|-------|-------------|
-| RTT waiting list | MA(1) + quadratic_trend | Log transformation |
-| A&E attendances | AR(1) with trend | Moving average smoothing |
-| Workforce FTE | AR(2) + quadratic_trend | All exog significant |
-| Bed occupancy | MA(1) + quadratic_trend | All exog significant |
-| RTT % within 18 weeks | Random walk with drift | Smoothed transition |
-| A&E 12-hour breach | Random walk + quadratic_trend | 8-quarter horizon |
+| Metric | Specification | Transform | Sigma Scale | Exogenous Variables |
+|--------|--------------|-----------|-------------|---------------------|
+| RTT waiting list (level) | ARIMA(0,1,1)×(1,0,1,4), trend='n' | log | 1.25 | `post_covid_trend_break` |
+| A&E attendances (flow) | ARIMA(1,1,0)×(0,0,0,4), trend='c' | – | 1.5 | – |
+| Workforce FTE (level) | ARIMA(2,1,0)×(1,0,1,4), trend='n' | – | 1.45 | `post_covid_trend_break`, `covid_pulse` |
+| Nurse FTE (level) | ARIMA(2,1,0)×(1,0,1,4), trend='n' | log | 1.4 | `post_covid_trend_break` |
+| Doctor FTE (level) | ARIMA(2,1,0)×(2,0,1,4), trend='c' | log | 1.8 | `post_covid_trend_break` |
+| Bed occupancy (level) | ARIMA(1,1,1)×(1,0,1,4), trend='n' | – | 1.8 | `covid_pulse`, `post_covid_regime` |
+| RTT % within 18 weeks | Logit ARMA(1,1), trend='n' | logit | 1.25 | `post_covid_trend_break` |
+| A&E 12‑hour breach (flow) | ARIMA(2,1,0)×(0,0,0,4), trend=None, 2021+ window | – | 1.0 | – |
+| PESA Health spend (level) | Random walk with drift | – | 1.0 | – |
 
-## Data Limitations
+*GP appointment series are excluded from forecasting due to insufficient history (11 quarterly observations).*
 
-The following metrics have data limitations that affect forecasting reliability:
+## Key Model Diagnostics
 
-| Metric | Limitation | Impact |
-|--------|------------|--------|
-| **GP total appointments** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
-| **GP face-to-face** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
-| **GP telephone** | Only 11 quarters available (Oct 2023 - Apr 2026) | No forecasts - historical data only |
-| **A&E 12-hour breach** | High volatility, short history (22 observations post-2021) | 8-quarter horizon, wide confidence intervals |
+- **Stationarity tests:** ADF, KPSS, ADF‑GLS (DF‑GLS)
+- **Residual diagnostics:** Ljung‑Box (autocorrelation), Jarque‑Bera (normality), ARCH‑LM (heteroskedasticity)
+- **Structural break:** Coefficients reported with heteroskedasticity‑robust p‑values
+- **Interval calibration:** Empirical sigma‑scale multipliers (1.0–1.8×) and t‑distribution‑based prediction intervals
 
-## Confidence Interval Disclosure
+## Known Limitations (Documented)
 
-The following metrics have confidence interval constraints applied due to data limitations:
-
-| Metric | Constraint | Rationale |
-|--------|------------|-----------|
-| **A&E 12-hour breach** | CI clamped to [30% of historical min, 120% of historical max]; horizon shortened to 8 quarters | High volatility, short history (22 obs) |
-| **Bed occupancy** | CI clamped to [85% of historical min, 115% of historical max] | Prevent unrealistic bounds |
-| **RTT % within 18 weeks** | CI capped at [0%, 100%] | Percentage cannot exceed bounds |
-
-**Note**: For the A&E 12-hour breach, the confidence intervals reflect true uncertainty due to the series' inherent volatility. The horizon has been shortened to 8 quarters (2 years) for stability. Treat these intervals as indicative, not statistical.
+- **GP appointments** – excluded from production forecasting (insufficient data).
+- **A&E 12‑hour breach** – small sample (22 obs post‑2021); forecast horizon capped at 8 quarters.
+- **HAC‑robust standard errors** – not currently available for ITS coefficients (custom estimator requires `t` as an exogenous regressor, which no specification includes). Inference relies on heteroskedasticity‑robust (HC) SEs.
+- **Counterfactual extrapolation** – ramp‑variable counterfactuals are bounded at 4 quarters to avoid explosive behaviour; percentage gaps for ramp‑affected series are not quoted as single headline figures (see technical write‑up).
 
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/ghulam7866/health-econ-dashboard.git
 cd health-econ-dashboard
-
-# Install dependencies
 pip install -r requirements.txt
+```
 
 ## Usage
 
-### Run the Full Pipeline
+### Run the full pipeline
 
 ```bash
 python run_pipeline.py
 ```
 
-### Launch the Dashboard
+### Launch the interactive dashboard
 
 ```bash
 streamlit run app.py
 ```
 
-### Run Individual Components
+### Run backtest for a single metric
 
 ```bash
-# Run diagnostics for a specific metric
-python stress_test.py "RTT waiting list (level)"
-
-# Validate forecasts
-python validate_forecasts.py
-
-# Run residual diagnostics
-python test_residuals.py
+python stress_test.py "Bed occupancy (level)"
 ```
 
-## Project Structure
+### Standalone analyses
 
+```bash
+python capacity_gap.py            # actual vs counterfactual gaps
+python bed_occ_kupiec.py          # Kupiec test for bed occupancy
+python check_residuals.py         # residual kurtosis & Ljung‑Box
 ```
-health-econ-dashboard/
-├── app.py                 # Streamlit dashboard
-├── run_pipeline.py        # Master pipeline runner
-├── src/
-│   ├── exog_config.py     # Model configuration
-│   ├── master_forecast_engine.py  # Main forecasting engine
-│   ├── align_merge.py     # Data alignment
-│   ├── cleaner.py         # Data cleaning
-│   ├── add_intervention_dummies.py  # COVID dummies
-│   └── pesa_annual_pipeline.py  # PESA annual pipeline
-├── tests/
-│   ├── stress_test.py     # Individual metric diagnostics
-│   ├── test_residuals.py  # Residual diagnostics
-│   └── validate_forecasts.py  # Forecast validation
-├── scripts/
-│   ├── test_scraper.py    # Data scraper
-│   ├── nice_reference.py  # NICE reference table
-│   └── spot_check.py      # Data validation
-├── data/
-│   ├── raw/               # Raw data (not tracked)
-│   └── processed/         # Processed data (not tracked)
-└── reports/               # Generated reports (not tracked)
-```
-
-## Requirements
-
-- Python 3.11+
-- pandas >= 2.0.0
-- numpy >= 1.24.0
-- statsmodels >= 0.14.0
-- streamlit >= 1.28.0
-- plotly >= 5.17.0
-- requests >= 2.31.0
-- openpyxl >= 3.1.0
-- matplotlib >= 3.7.0
-- seaborn >= 0.12.0
-- scikit-learn >= 1.3.0
-
-See `requirements.txt` for full list.
 
 ## Data Sources
 
-- **NHS England**: RTT waiting times, A&E attendances, Workforce FTE, Bed occupancy
-- **NHS Digital**: GP appointments
-- **ONS**: UK population estimates
-- **HM Treasury**: PESA Health expenditure
-- **NICE**: QALY cost-effectiveness thresholds
+- **NHS England** – RTT waiting times, A&E attendances, workforce statistics, bed occupancy
+- **NHS Digital** – GP appointments
+- **ONS** – UK population estimates
+- **HM Treasury** – PESA Chapter 4 (health expenditure)
+- **NICE** – QALY cost‑effectiveness thresholds
 
-## Model Methodology
+## Project Structure
 
-All models were selected through comprehensive diagnostic testing including:
-
-- **Stationarity tests**: ADF, KPSS, ADF-GLS (ERS)
-- **Seasonal unit root tests**: HEGY
-- **AICc grid search**: For optimal ARIMA orders
-- **AR/MA root stability**: To ensure model invertibility
-- **Residual diagnostics**: Ljung-Box, Jarque-Bera, ARCH tests
-- **Backtesting**: Rolling-origin expanding window validation
-
-## Model Documentation
-
-| Metric | Order | Seasonal Order | Trend | Transformation | Exogenous Variables |
-|--------|-------|----------------|-------|----------------|---------------------|
-| RTT waiting list | (0,1,1) | (1,0,1,4) | c | Log | quadratic_trend |
-| A&E attendances | (1,0,0) | (0,0,0,4) | c | None | None |
-| Workforce FTE | (2,1,0) | (1,0,1,4) | c | None | covid_pulse, post_covid_trend_break, quadratic_trend |
-| Bed occupancy | (0,1,1) | (1,0,1,4) | c | None | covid_pulse, post_covid_regime, quadratic_trend |
-| RTT % within 18 weeks | (0,1,0) | (0,0,0,4) | c | None | None |
-| A&E 12-hour breach | (0,1,0) | (1,0,0,4) | None | None | quadratic_trend |
-
-## Pipeline Outputs
-
-| Output | Description |
-|--------|-------------|
-| `dashboard_forecasts.csv` | Combined historical and forecast data for the dashboard |
-| `combined_quarterly.csv` | Quarterly aligned data with exogenous variables |
-| `rtt_clean.csv` | Cleaned RTT waiting times data |
-| `ae_clean.csv` | Cleaned A&E attendances data |
-| `gp_appointments_clean.csv` | Cleaned GP appointments data |
-| `workforce_clean.csv` | Cleaned workforce FTE data |
-| `beds_clean.csv` | Cleaned bed occupancy data |
-| `pesa_clean.csv` | Cleaned PESA health expenditure data |
+```text
+health-econ-dashboard/
+├── app.py                          # Streamlit dashboard
+├── run_pipeline.py                 # End‑to‑end pipeline runner
+├── test_scraper.py                 # Raw data scraper
+├── append_ae_june.py               # One‑off A&E data merge (June 2026)
+├── stress_test.py                  # Rolling‑origin backtest engine
+├── requirements.txt
+├── README.md
+├── src/
+│   ├── exog_config.py              # Single source of truth for model specs
+│   ├── master_forecast_engine.py   # Production forecasting engine
+│   ├── align_merge.py              # Quarterly resampling & alignment
+│   ├── cleaner.py                  # Data cleaning & extraction
+│   ├── add_intervention_dummies.py # COVID intervention dummies
+│   └── pesa_annual_pipeline.py     # PESA annual forecast pipeline
+├── scripts/
+│   ├── analysis/                   # Standalone analysis scripts
+│   └── diagnostics/                # Diagnostic scripts
+├── data/
+│   ├── raw/                        # Raw data (not tracked)
+│   └── processed/                  # Processed data (not tracked)
+└── docs/                           # Executive summary & technical write‑up
+```
 
 ## License
 
@@ -178,10 +133,3 @@ MIT
 ## Author
 
 ghulam7866
-
-## Acknowledgments
-
-- NHS England for open data access
-- NICE for QALY threshold guidance
-- HM Treasury for PESA data
-- ONS for population estimates

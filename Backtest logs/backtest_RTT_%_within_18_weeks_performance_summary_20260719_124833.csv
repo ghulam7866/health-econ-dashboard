@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+RTT % within 18 weeks (performance),76,12,"PRODUCTION (1, 0, 1)x(0, 0, 0, 4) n, exog=['post_covid_trend_break']",58,0.22695965005981653,0.15927598079962896,-0.030455649637335342,0.6551724137931034,0.9137931034482759,OK,FLAG,OK,OK

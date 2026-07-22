@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+Doctor FTE (level),67,12,"PRODUCTION (2, 1, 0)x(2, 0, 1, 4) c, exog=['post_covid_trend_break']",49,9405.44614414011,5089.942975077465,-908.4386350770712,1.0,0.8367346938775511,OK,FLAG,FLAG,OK

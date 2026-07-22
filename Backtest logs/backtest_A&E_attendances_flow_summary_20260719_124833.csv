@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+A&E attendances (flow),64,12,"PRODUCTION (1, 1, 0)x(0, 0, 0, 4) c, exog=none",46,1026421.5512376939,660855.2360713452,-39596.09188245051,0.6956521739130435,0.9782608695652174,OK,FLAG,OK,OK

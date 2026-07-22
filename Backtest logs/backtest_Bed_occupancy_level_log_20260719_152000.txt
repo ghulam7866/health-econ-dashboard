@@ -1,0 +1,201 @@
+==========================================================================================
+INDIVIDUAL METRIC BACKTEST
+==========================================================================================
+Run started: 2026-07-19T15:20:00.437151
+Input: C:\Users\44782\Desktop\empirical project\data\processed\combined_quarterly.csv
+Metric: Bed occupancy (level)
+Fast: False
+
+
+##########################################################################################
+# METRIC: Bed occupancy (level)
+# Series: total_occupied_beds_overnight
+##########################################################################################
+Loaded 64 obs, 2010-04-01 to 2026-01-01
+Horizons: [1, 2, 3, 4, 8, 12] | Min train: 6
+Candidates (9): ["PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']", "ALT: trend flip -> 'c'", "AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'", "ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])", 'EXOG ISOLATION: covid_pulse only', 'EXOG ISOLATION: post_covid_regime only', 'ALT: AR(1) only (1,1,0)', 'ALT: MA(1) only (0,1,1)', 'BASELINE: white noise (0,1,0)']
+
+==========================================================================================
+DIAGNOSTIC SEQUENCE
+==========================================================================================
+
+--- [1/5] Significance screen (OLS) ---
+  covid_pulse               coef=   -24443.4066  p=0.0000  [OK]
+  post_covid_regime         coef=    -1815.7833  p=0.1131  [FLAG: not significant]
+
+--- [2/5] Quadratic trend check ---
+  t^2 coef=9.667884  p=0.0003  [FLAG: significant curvature]
+
+--- [3/5] Stationarity checks ---
+  level                ADF p=0.0088 [stationary]   KPSS p=0.0926 [stationary]
+  1st diff             ADF p=0.0000 [stationary]   KPSS p=0.1000 [stationary]
+  seasonal diff (4)    ADF p=0.0291 [stationary]   KPSS p=0.1000 [stationary]
+
+--- [4/5] Order selection (AICc grid) ---
+  Fitted 144/144 combinations.
+  AICc=   -282.07  order=(0, 1, 2)  seasonal_order=(1, 0, 0, 4)  trend=None
+  AICc=   -281.61  order=(0, 1, 2)  seasonal_order=(1, 0, 1, 4)  trend=None
+  AICc=   -280.95  order=(2, 1, 0)  seasonal_order=(1, 0, 0, 4)  trend=None
+  AICc=   -280.25  order=(2, 1, 0)  seasonal_order=(1, 0, 1, 4)  trend=None
+  AICc=   -280.23  order=(1, 1, 1)  seasonal_order=(1, 0, 1, 4)  trend=None
+
+--- [5/5] Instability check ---
+  PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime'] [near-unit-root AR (1.025)]
+  ALT: trend flip -> 'c'                                  [OK]
+  AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'           [OK]
+  ALT: no exog (drop ['covid_pulse', 'post_covid_regime']) [near-unit-root AR (1.001); near-non-invertible MA (1.002)]
+  EXOG ISOLATION: covid_pulse only                        [near-non-invertible MA (1.049)]
+  EXOG ISOLATION: post_covid_regime only                  [near-unit-root AR (1.024)]
+  ALT: AR(1) only (1,1,0)                                 [near-unit-root AR (1.020)]
+  ALT: MA(1) only (0,1,1)                                 [OK]
+  BASELINE: white noise (0,1,0)                           [OK]
+
+Reminder: this report is informational only.
+DEBUG sigma_scale = 1.8
+DEBUG sigma applied: old_hw=0.000109, new_hw=0.000196, ratio=1.8
+DEBUG sigma applied: old_hw=0.000003, new_hw=0.000006, ratio=1.8
+DEBUG sigma applied: old_hw=0.010933, new_hw=0.019680, ratio=1.8000000000000003
+DEBUG sigma applied: old_hw=0.000109, new_hw=0.000196, ratio=1.8
+DEBUG sigma applied: old_hw=0.000109, new_hw=0.000196, ratio=1.8
+DEBUG sigma applied: old_hw=0.000109, new_hw=0.000196, ratio=1.8
+DEBUG sigma applied: old_hw=0.021364, new_hw=0.038455, ratio=1.8000000000000003
+DEBUG sigma applied: old_hw=0.000022, new_hw=0.000039, ratio=1.8
+DEBUG sigma applied: old_hw=0.053958, new_hw=0.097124, ratio=1.8
+
+==========================================================================================
+BACKTEST RESULTS
+==========================================================================================
+
+--- Horizon = 1 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   57     8637.8629     3279.4568     -481.6458    0.77    0.89
+ALT: trend flip -> 'c'                                    57     8817.4580     3663.7827     +189.7716    0.75    0.84
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             57     9248.3254     4142.1424     -269.2957    0.70    0.88
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   57    10901.9644     3907.1517    -1582.9770    0.77    0.89
+EXOG ISOLATION: covid_pulse only                          57     9474.6999     3929.2048     -601.4264    0.81    0.88
+EXOG ISOLATION: post_covid_regime only                    57    12051.3251     4490.3503     -727.0332    0.81    0.88
+ALT: AR(1) only (1,1,0)                                   57     8375.0031     3282.6170     -306.3657    0.79    0.93
+ALT: MA(1) only (0,1,1)                                   57     8895.4201     3425.4109     -535.6376    0.75    0.89
+BASELINE: white noise (0,1,0)                             57     5785.8207     3307.6493      +41.0380    0.00    0.98
+
+--- Horizon = 2 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   56    13583.2275     4930.7773     -691.4076    0.71    0.88
+ALT: trend flip -> 'c'                                    56    14032.8968     5646.3397     +523.4522    0.68    0.84
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             56    14720.9547     6221.4199     -509.4041    0.54    0.86
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   56    17573.2024     6013.3111    -2803.1661    0.62    0.88
+EXOG ISOLATION: covid_pulse only                          56    15160.3009     5747.0258     -854.1897    0.66    0.86
+EXOG ISOLATION: post_covid_regime only                    56    19842.0296     7117.4219    -1363.2567    0.66    0.86
+ALT: AR(1) only (1,1,0)                                   56    13473.3510     5215.0443     -776.0316    0.62    0.93
+ALT: MA(1) only (0,1,1)                                   56    14109.0612     5177.1056     -969.4110    0.66    0.89
+BASELINE: white noise (0,1,0)                             56     7403.9434     4376.1281     +151.0969    0.00    0.96
+
+--- Horizon = 3 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   55    17998.5940     5890.5002     -898.3304    0.69    0.85
+ALT: trend flip -> 'c'                                    55    18757.1493     7407.2545     +850.8973    0.65    0.78
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             55    19964.6779     7711.7694     -755.8470    0.55    0.82
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   55    23839.9893     7596.9057    -3900.7958    0.69    0.85
+EXOG ISOLATION: covid_pulse only                          55    20218.9068     7166.3463    -1058.1615    0.71    0.84
+EXOG ISOLATION: post_covid_regime only                    55    27061.1551     9269.7821    -1967.6107    0.73    0.84
+ALT: AR(1) only (1,1,0)                                   55    17844.1194     6421.5850    -1038.9517    0.78    0.93
+ALT: MA(1) only (0,1,1)                                   55    18725.9637     6503.4943    -1396.4572    0.67    0.87
+BASELINE: white noise (0,1,0)                             55     7640.0557     4663.4017     +210.3555    0.00    0.96
+
+--- Horizon = 4 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   54    23515.0627     6992.6341    -1146.5554    0.54    0.81
+ALT: trend flip -> 'c'                                    54    24317.6611     9045.5438    +1002.3530    0.48    0.78
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             54    25286.0257     8807.2635     -975.3554    0.37    0.80
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   54    33067.5313     9281.9123    -4947.7871    0.44    0.83
+EXOG ISOLATION: covid_pulse only                          54    25611.3500     8333.7113    -1273.0221    0.54    0.80
+EXOG ISOLATION: post_covid_regime only                    54    35649.6135    10745.9588    -2679.1649    0.48    0.81
+ALT: AR(1) only (1,1,0)                                   54    23087.0506     7454.1858    -1278.5771    0.56    0.93
+ALT: MA(1) only (0,1,1)                                   54    24300.2065     7534.2174    -1729.1288    0.50    0.87
+BASELINE: white noise (0,1,0)                             54     8282.1020     4433.3839     +214.5665    0.00    0.98
+
+--- Horizon = 8 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   50    45102.2942    11686.5278    -3023.1884    0.70    0.84
+ALT: trend flip -> 'c'                                    50    46932.5054    16306.1620    +1709.3401    0.60    0.80
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             50    48743.0230    15751.2195    -2470.2562    0.26    0.80
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   50    76301.4449    17353.3175   -11987.5169    0.50    0.86
+EXOG ISOLATION: covid_pulse only                          50    50165.9681    14167.2062    -2470.8503    0.60    0.82
+EXOG ISOLATION: post_covid_regime only                    50    82242.5249    21365.9509    -7789.1361    0.58    0.84
+ALT: AR(1) only (1,1,0)                                   50    44092.9951    12231.4744    -3348.1728    0.68    0.90
+ALT: MA(1) only (0,1,1)                                   50    46479.8431    12377.1237    -4055.4547    0.68    0.86
+BASELINE: white noise (0,1,0)                             50    10180.0212     5875.3576     +297.3941    0.00    0.98
+
+--- Horizon = 12 quarter(s) ---
+Spec                                                       n          RMSE           MAE          Bias  DirAcc   CICov
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']   46    67598.0252    16901.4790    -5687.1925    0.65    0.83
+ALT: trend flip -> 'c'                                    46    70849.9149    23787.6957    +1839.6932    0.57    0.72
+AICc GRID WINNER: (1,0,0)x(0,0,1,4) trend='c'             46    73158.3219    21791.1100    -4172.1952    0.24    0.74
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])   46   131942.1692    27742.9913   -21479.3537    0.52    0.87
+EXOG ISOLATION: covid_pulse only                          46    75985.0048    20649.1929    -3771.6293    0.61    0.80
+EXOG ISOLATION: post_covid_regime only                    46   141217.0184    34955.9713   -15109.9145    0.57    0.85
+ALT: AR(1) only (1,1,0)                                   46    65930.4715    17193.5600    -5958.5629    0.63    0.91
+ALT: MA(1) only (0,1,1)                                   46    69630.3972    17468.0839    -7004.7266    0.63    0.91
+BASELINE: white noise (0,1,0)                             46    11079.4166     6844.2202     +426.8012    0.00    1.00
+
+Bias >0 = over-forecasting; <0 = under-forecasting.
+DirAcc = fraction of correct up/down calls.
+CICov  = fraction inside 95% CI (target ~0.95).
+
+--- Trend comparison (horizon 12) ---
+    trend='n': coverage=0.83, bias=-5687.2
+    trend='c': coverage=0.72, bias=1839.7
+    Selected: trend='n' (higher coverage / lower bias)
+
+==========================================================================================
+BIAS SUMMARY - long horizons
+(horizons: [8, 12])
+==========================================================================================
+Spec                                                                            h=8                        h=12
+PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']           -3023.1884(UNDER)           -5687.1925(UNDER)
+ALT: trend flip -> 'c'                                             +1709.3401(OVER)            +1839.6932(OVER)
+ALT: no exog (drop ['covid_pulse', 'post_covid_regime'])          -11987.5169(UNDER)          -21479.3537(UNDER)
+EXOG ISOLATION: covid_pulse only                                  -2470.8503(UNDER)           -3771.6293(UNDER)
+EXOG ISOLATION: post_covid_regime only                            -7789.1361(UNDER)          -15109.9145(UNDER)
+ALT: AR(1) only (1,1,0)                                           -3348.1728(UNDER)           -5958.5629(UNDER)
+ALT: MA(1) only (0,1,1)                                           -4055.4547(UNDER)           -7004.7266(UNDER)
+BASELINE: white noise (0,1,0)                                       +297.3941(OVER)             +426.8012(OVER)
+
+==========================================================================================
+RESIDUAL DIAGNOSTICS (production spec, full-history fit)
+==========================================================================================
+  AICc = -170.37
+
+  Ljung-Box (H0: no autocorrelation left)
+    lag=4   stat=10.650  p=0.0308  [FLAG: residual autocorrelation remains]
+    lag=8   stat=10.884  p=0.2083  [OK]
+
+  Jarque-Bera: stat=4159.218  p=0.0000  skew=4.934  kurt=41.241  [FLAG: residuals non-normal]
+
+  ARCH LM: stat=57.231  p=0.0000  [FLAG: heteroskedasticity]
+
+  Note: low power expected with short quarterly series.
+
+
+COMPACT SUMMARY
+  metric_key: Bed occupancy (level)
+  n_obs: 64
+  longest_horizon_tested: 12
+  production_spec: PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']
+  n_folds: 46
+  rmse: 67598.02519656422
+  mae: 16901.4789617587
+  bias: -5687.192500985869
+  dir_acc: 0.6521739130434783
+  ci_coverage: 0.8260869565217391
+  ljung_box: FLAG
+  jarque_bera: FLAG
+  arch_heteroskedasticity: FLAG
+  residual_fit_status: OK
+
+Summary saved: C:\Users\44782\Desktop\empirical project\reports\backtest_Bed_occupancy_level_summary_20260719_152000.csv
+
+Log saved: C:\Users\44782\Desktop\empirical project\reports\backtest_Bed_occupancy_level_log_20260719_152000.txt
+==========================================================================================
+
+All backtests completed.

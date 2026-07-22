@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+Workforce FTE (level),67,12,"PRODUCTION (2, 1, 0)x(1, 0, 1, 4) n, exog=['post_covid_trend_break', 'covid_pulse']",49,90120.8743765791,65608.38809776538,-52146.79994317246,0.7142857142857143,0.8775510204081632,OK,FLAG,FLAG,OK

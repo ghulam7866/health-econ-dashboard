@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+A&E 12-hour decisions to admit (breach flow),22,8,"PRODUCTION (2, 1, 0)x(0, 0, 0, 4) None, exog=none",8,54205.16277851801,40980.11463472781,-6259.380994522053,0.625,1.0,OK,OK,OK,OK

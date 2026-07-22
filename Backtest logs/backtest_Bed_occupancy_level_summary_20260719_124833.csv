@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+Bed occupancy (level),64,12,"PRODUCTION (1, 1, 1)x(1, 0, 1, 4) n, exog=['covid_pulse', 'post_covid_regime']",46,67598.02519656422,16901.4789617587,-5687.192500985869,0.6521739130434783,0.8260869565217391,FLAG,FLAG,FLAG,OK

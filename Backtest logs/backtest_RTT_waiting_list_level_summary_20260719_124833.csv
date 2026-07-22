@@ -1,0 +1,2 @@
+metric_key,n_obs,longest_horizon_tested,production_spec,n_folds,rmse,mae,bias,dir_acc,ci_coverage,ljung_box,jarque_bera,arch_heteroskedasticity,residual_fit_status
+RTT waiting list (level),76,12,"PRODUCTION (0, 1, 1)x(1, 0, 1, 4) n, exog=['post_covid_trend_break']",58,2911579.793553264,1713293.6224679777,394789.8236997405,0.7586206896551724,0.8448275862068966,OK,FLAG,FLAG,OK

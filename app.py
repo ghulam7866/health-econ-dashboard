@@ -1,10 +1,27 @@
 """
 app.py
 ------
-Frontend Streamlit interactive dashboard application.
-Now includes derived workforce‑efficiency metrics, GP‑to‑A&E ratio,
-asymmetric CI bounds, horizon cap, NICE threshold overlay, policy‑context notes,
-System Strain Overview page, and ITS counterfactual display.
+Frontend Streamlit interactive dashboard for the NHS Health Economic
+Forecasting project.
+
+The dashboard provides two views, selectable via the sidebar:
+  1. **Individual Series Analysis** – interactive time‑series plots
+     for each metric, with forecast confidence intervals, NICE
+     threshold overlays, and (where available) ITS counterfactual
+     lines.
+  2. **System Strain Overview** – a summary table of current trends,
+     forecast directions, confidence ratings, and plain‑language
+     interpretations for all nine core metrics.
+
+Derived metrics (per‑capita, workforce‑efficiency ratios) are
+constructed on the fly from the base forecasts.
+
+Usage:
+    streamlit run app.py
+
+Requirements:
+    - Processed data files in data/processed/ (run the full pipeline first).
+    - Streamlit and Plotly installed.
 """
 
 import streamlit as st
@@ -15,6 +32,7 @@ import numpy as np
 import sys
 import html
 
+# ---------- Paths ----------
 ROOT_DIR = Path(__file__).parent.resolve()
 FORECAST_PATH = ROOT_DIR / "data" / "processed" / "dashboard_forecasts.csv"
 COMBINED_PATH = ROOT_DIR / "data" / "processed" / "combined_quarterly.csv"
@@ -22,10 +40,13 @@ NICE_PATH = ROOT_DIR / "data" / "processed" / "nice_clean.csv"
 POPULATION_PATH = ROOT_DIR / "data" / "processed" / "population_clean.csv"
 COUNTERFACTUAL_PATH = ROOT_DIR / "data" / "processed" / "counterfactuals.csv"
 
+# Make src/ importable for metric name mapping
 sys.path.insert(0, str(ROOT_DIR / "src"))
 from exog_config import METRIC_NAMES
 
 # ---------- metric definitions ----------
+# Each tuple: (display name used in the dashboard, short label for raw series,
+#              boolean: True if the metric is a percentage)
 METRICS = [
     ("RTT waiting list (level)", "RTT waiting list", False),
     ("A&E attendances (flow)", "A&E attendances", False),
@@ -38,6 +59,7 @@ METRICS = [
     ("PESA Health spend (level)", "PESA Health spend", False),
 ]
 
+# Backtest‑validated coverage ratings (used in the Strain Overview table)
 COVERAGE = {
     "RTT waiting list (level)": "Coverage 0.93 (h=12)",
     "A&E attendances (flow)": "Coverage 0.94 (h=8)",
@@ -50,6 +72,7 @@ COVERAGE = {
     "PESA Health spend (level)": "Not backtested – random‑walk model",
 }
 
+# Plain‑language interpretations for the Strain Overview table
 INTERPRETATION = {
     "RTT waiting list (level)":
         "Recent decline, but the forecast expects renewed growth, consistent with a dampened trend.",
@@ -71,12 +94,21 @@ INTERPRETATION = {
         "Quarterly trend not meaningful (annual data); forecast reflects the annual drift model (see footnote 4).",
 }
 
+# Set Streamlit page config – must be the first Streamlit command
 st.set_page_config(
     page_title="Health Econometric Forecasting Dashboard",
     layout="wide"
 )
 
+# ------------------------------------------------------------
+# Data loading helper
+# ------------------------------------------------------------
 def load_data():
+    """
+    Load forecast, NICE threshold, and population data from processed CSVs.
+    Returns (forecast_df, nice_df, pop_df).
+    Exits with a FileNotFoundError if the forecast file is missing.
+    """
     if not FORECAST_PATH.exists():
         raise FileNotFoundError(f"Forecast file not found at: {FORECAST_PATH}")
     df = pd.read_csv(FORECAST_PATH)
@@ -94,16 +126,25 @@ def load_data():
 
     return df, nice_df, pop_df
 
+
 def calculate_ci_width(fore_df):
+    """Average confidence interval width as a percentage of the forecast value."""
     if fore_df.empty or "ci_lower" not in fore_df.columns or "ci_upper" not in fore_df.columns:
         return None
     ci_width = ((fore_df["ci_upper"] - fore_df["ci_lower"]) / fore_df["value"]).mean() * 100
     return ci_width
 
+
 def is_percentage_metric(metric_name):
+    """Return True if the metric represents a percentage (e.g., % within 18 weeks)."""
     return "%" in metric_name or "percentage" in metric_name.lower() or "within 18 weeks" in metric_name.lower()
 
+
 def calculate_forecast_quality(fore_df, hist_df=None, metric_name=""):
+    """
+    Heuristic assessment of forecast stability and direction.
+    Returns (quality_str, direction_str, rel_variation, change_pct).
+    """
     if fore_df.empty or len(fore_df) < 3:
         return "Insufficient data", "Unknown", None, None
 
@@ -135,6 +176,7 @@ def calculate_forecast_quality(fore_df, hist_df=None, metric_name=""):
         rel_variation = None
         quality = "Insufficient data for variation assessment"
 
+    # Determine direction using linear trend or endpoint comparison
     if len(values) > 3:
         t = np.arange(len(values))
         slope = np.polyfit(t, values, 1)[0]
@@ -159,7 +201,9 @@ def calculate_forecast_quality(fore_df, hist_df=None, metric_name=""):
 
     return quality, direction, rel_variation, change_pct
 
+
 def display_calibration_disclaimer(metric_name):
+    """Show per‑series caveats about model calibration."""
     if metric_name == "Workforce FTE (level)":
         st.caption(
             "**Note**: This model is the best performer among tested alternatives, "
@@ -191,7 +235,9 @@ def display_calibration_disclaimer(metric_name):
             "selected via rolling-origin backtesting. Confidence intervals are shown at the 95% level."
         )
 
+
 def format_value(value, metric_name, is_percentage=False):
+    """Human‑readable formatting for metric values."""
     if is_percentage or is_percentage_metric(metric_name):
         return f"{value:.1%}" if value < 1 else f"{value:.1f}%"
     elif value >= 1e6:
@@ -201,9 +247,11 @@ def format_value(value, metric_name, is_percentage=False):
     else:
         return f"{value:.1f}"
 
+
 # ------------------------------------------------------------
-# Derived metric helpers (unchanged)
+# Derived metric helpers
 # ------------------------------------------------------------
+# Each entry defines how to construct a derived metric from base forecasts.
 DERIVED_METRICS = {
     "RTT waiting list per 1,000 population": {
         "base_metric": "RTT waiting list (level)",
@@ -233,6 +281,7 @@ DERIVED_METRICS = {
         "unit": "Ratio",
         "note": "Ratio > 1 indicates more GP activity relative to A&E demand; falling ratio suggests increasing acute pressure.",
     },
+    # Workforce efficiency ratios
     "RTT waiting list per 1,000 FTE": {
         "base_metric": "RTT waiting list (level)",
         "divisor_metric": "Workforce FTE (level)",
@@ -256,9 +305,17 @@ DERIVED_METRICS = {
     },
 }
 
+
 def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
+    """
+    Build history and forecast DataFrames for a derived metric.
+    Supports population‑based per‑capita, ratio of two metrics, and
+    workforce efficiency ratios.
+    Returns (hist_df, fore_df, unit_label, note).
+    """
     info = DERIVED_METRICS[selected_derived]
 
+    # ---- Population‑based per‑capita ----
     if info.get("divisor") == "population":
         base_metric = info["base_metric"]
         scaling = info["scaling"]
@@ -273,6 +330,7 @@ def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
         fore_df["year"] = fore_df["quarter"].dt.year
         hist_df = hist_df.merge(pop[["year", "population"]], on="year", how="left")
         fore_df = fore_df.merge(pop[["year", "population"]], on="year", how="left")
+        # Forward‑fill population for forecast years beyond the last ONS estimate
         last_pop = pop["population"].iloc[-1]
         fore_df["population"] = fore_df["population"].fillna(last_pop)
         hist_df["population"] = hist_df["population"].fillna(last_pop)
@@ -285,6 +343,7 @@ def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
         fore_df = fore_df.drop(columns=["year", "population"])
         return hist_df, fore_df, info["unit"], info["note"]
 
+    # ---- GP / A&E ratio ----
     elif info.get("divisor") == "A&E attendances (flow)":
         gp_metric = "GP total appointments (flow)"
         ae_metric = "A&E attendances (flow)"
@@ -311,6 +370,7 @@ def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
         fore["ci_upper"] = np.nan
         return hist, fore, info["unit"], info["note"]
 
+    # ---- Ratio of two forecast metrics (efficiency) ----
     elif "divisor_metric" in info:
         base_metric = info["base_metric"]
         divisor_metric = info["divisor_metric"]
@@ -330,6 +390,7 @@ def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
         fore = base_fore.merge(div_fore[["quarter", "value", "ci_lower", "ci_upper"]],
                                on="quarter", suffixes=("_base", "_div"))
         fore["value"] = (fore["value_base"] / fore["value_div"].replace(0, np.nan)) * scaling
+        # Propagate CIs proportionally (simplified delta method)
         if "ci_lower_base" in fore.columns and "ci_lower_div" in fore.columns:
             fore["ci_lower"] = fore["ci_lower_base"] / fore["value_div"] * scaling
             fore["ci_upper"] = fore["ci_upper_base"] / fore["value_div"] * scaling
@@ -341,10 +402,17 @@ def build_derived_series(selected_derived, forecast_df, pop_df, nice_df=None):
     else:
         raise ValueError("Unknown divisor type")
 
+
 # ------------------------------------------------------------
-# Strain overview computation (unchanged)
+# Strain overview computation
 # ------------------------------------------------------------
 def compute_strain_table():
+    """
+    Build the strain summary table by calculating annualised trends
+    over the last four historical quarters and forecast directions
+    over the full horizon.
+    Returns (table_df, footnotes_list).
+    """
     if not FORECAST_PATH.exists():
         raise FileNotFoundError(f"Forecast file not found at: {FORECAST_PATH}")
     if not COMBINED_PATH.exists():
@@ -359,17 +427,19 @@ def compute_strain_table():
         if raw_name is None:
             continue
 
+        # ----- current trend (last 4 historical quarters) -----
         hist_all = combined[combined["metric"] == raw_name].dropna(subset=["value"]).sort_values("quarter")
         if len(hist_all) >= 4:
             recent = hist_all.tail(4).copy()
             x = np.arange(len(recent))
             y = recent["value"].values
-            b, _ = np.polyfit(x, y, 1)
+            b, _ = np.polyfit(x, y, 1)          # linear slope
             avg = np.mean(y)
-            trend_pct = (b * 4) / avg * 100 if avg != 0 else 0.0
+            trend_pct = (b * 4) / avg * 100 if avg != 0 else 0.0   # annualised
         else:
             trend_pct = np.nan
 
+        # ----- forecast direction (from dashboard_forecasts) -----
         fore = df[(df["metric"] == metric_key) & (df["type"] == "forecast")].sort_values("quarter")
         if len(fore) >= 3:
             xf = np.arange(len(fore))
@@ -378,6 +448,8 @@ def compute_strain_table():
             avg_f = np.mean(yf)
             slope_pct = (slope / avg_f) * 100 if avg_f != 0 else 0.0
             total_change = slope_pct * (len(fore) - 1)
+
+            # ±2% threshold to avoid treating noise as a directional signal
             if total_change > 2.0:
                 direction = "Increasing"
             elif total_change < -2.0:
@@ -388,6 +460,7 @@ def compute_strain_table():
             direction = "N/A"
             total_change = np.nan
 
+        # ----- trend display string -----
         if metric_key == "PESA Health spend (level)":
             trend_disp = "Annual series"
         elif np.isnan(trend_pct):
@@ -395,6 +468,7 @@ def compute_strain_table():
         else:
             trend_disp = f"{trend_pct:+.2f}%"
 
+        # ----- forecast display string -----
         if total_change is not np.nan:
             fore_disp = f"{direction}, {total_change:+.2f}% total"
         else:
@@ -413,6 +487,7 @@ def compute_strain_table():
         "Confidence rating", "Interpretation"
     ])
 
+    # Footnotes that appear below the strain table
     footnotes = [
         "1. Doctor FTE: The linear‑fit‑implied total change (~23%) understates the endpoint movement (~27%) because the forecast trajectory is curved. The interpretation line gives a range; the detailed backtest log contains both figures.",
         "2. A&E attendances: The trend was temporarily withheld due to a partial quarter in the raw data. June 2026 monthly data was subsequently appended, completing the quarter and allowing a reliable trend to be calculated. The current trend of +1.89% reflects the most recent four complete quarters.",
@@ -425,10 +500,12 @@ def compute_strain_table():
     ]
     return table_df, footnotes
 
+
 # ------------------------------------------------------------
-# Individual Series Analysis Page (with ITS counterfactual)
+# Individual Series Analysis Page
 # ------------------------------------------------------------
 def individual_series_page():
+    """Render the interactive time‑series analysis view."""
     st.title("Health Systems Econometric Forecasting Dashboard")
     st.markdown("---")
 
@@ -442,24 +519,25 @@ def individual_series_page():
         st.error("The forecast file is empty. Please run pipeline again.")
         return
 
-    # Load counterfactuals if available
+    # Load counterfactuals if available (for ITS overlay)
     counterfactual_df = None
     if COUNTERFACTUAL_PATH.exists():
         counterfactual_df = pd.read_csv(COUNTERFACTUAL_PATH)
         counterfactual_df["quarter"] = pd.to_datetime(counterfactual_df["quarter"])
 
     st.sidebar.header("Series Selection")
-
     base_metrics = sorted(df["metric"].dropna().unique())
     derived_labels = list(DERIVED_METRICS.keys())
     all_options = base_metrics + derived_labels
     selected = st.sidebar.selectbox("Choose a system indicator to analyse:", all_options)
 
+    # Display options
     show_ci = st.sidebar.checkbox("Display 95% Forecast Confidence Intervals", value=True)
     show_nice = st.sidebar.checkbox("Overlay NICE QALY Policy Threshold Shifts", value=True)
     show_counterfactual = st.sidebar.checkbox("Show ITS Counterfactual (no break)", value=True)
     zoom_forecast = st.sidebar.checkbox("Zoom Y-Axis to Forecast Range", value=False)
 
+    # Horizon cap slider
     max_horizons = 24
     horizon_cap = st.sidebar.slider(
         "Max forecast quarters to display",
@@ -467,6 +545,7 @@ def individual_series_page():
         help="Limits the x‑axis to the first N forecast quarters for clarity."
     )
 
+    # ---- Build history and forecast DataFrames ----
     if selected in DERIVED_METRICS:
         is_derived = True
         derived_info = DERIVED_METRICS[selected]
@@ -495,26 +574,29 @@ def individual_series_page():
         is_pct = is_percentage_metric(selected_metric)
         note = None
 
+    # Limit forecast to selected horizon
     if not fore_df.empty and len(fore_df) > horizon_cap:
         fore_df_display = fore_df.head(horizon_cap)
     else:
         fore_df_display = fore_df
 
+    # Warnings for data‑limited series
     if selected_metric.startswith("GP") and not is_derived:
         st.warning(
             "Data Limitation: GP appointments data is only available from October 2023. "
             "With only 11 quarterly observations, reliable forecasting is not possible. "
             "Only historical data is shown. This is a data scope limitation."
         )
-
     if "A&E 12-hour" in selected_metric and "breach" in selected_metric.lower():
         st.warning(
             "Note: This series is highly volatile with a short history (22 observations post-2021). "
             "Confidence intervals are wide and should be interpreted with caution."
         )
 
+    # ---- Build Plotly figure ----
     fig = go.Figure()
 
+    # Observed history
     if not hist_df.empty:
         fig.add_trace(go.Scatter(
             x=hist_df["quarter"], y=hist_df["value"],
@@ -522,6 +604,7 @@ def individual_series_page():
             line=dict(color="#1f77b4", width=2.5)
         ))
 
+    # Forecast horizon (with connecting line from last history point)
     if not fore_df_display.empty and not selected_metric.startswith("GP"):
         if not hist_df.empty:
             last_hist = hist_df.iloc[-1:]
@@ -535,6 +618,7 @@ def individual_series_page():
             line=dict(color="#ff7f0e", width=2.5, dash="dash")
         ))
 
+        # Confidence intervals
         if show_ci and "ci_lower" in fore_df_display.columns and "ci_upper" in fore_df_display.columns:
             if not hist_df.empty:
                 plot_fore_ci = pd.concat([last_hist, fore_df_display], ignore_index=True)
@@ -553,11 +637,10 @@ def individual_series_page():
                 name="95% Confidence Interval"
             ))
 
-        # ---- ITS counterfactual trace ----
+        # ITS counterfactual (green dashed line)
         if show_counterfactual and counterfactual_df is not None:
             c_df = counterfactual_df[counterfactual_df["metric"] == selected_metric]
             if not c_df.empty:
-                # restrict to same forecast quarters as displayed
                 c_df = c_df[c_df["quarter"].isin(fore_df_display["quarter"])]
                 if not c_df.empty:
                     fig.add_trace(go.Scatter(
@@ -578,6 +661,7 @@ def individual_series_page():
                             name="Counterfactual CI"
                         ))
     elif selected_metric.startswith("GP") and not hist_df.empty and not is_derived:
+        # Show an annotation when no forecast is available
         last_date = hist_df["quarter"].iloc[-1]
         last_value = hist_df["value"].iloc[-1]
         fig.add_annotation(
@@ -587,6 +671,7 @@ def individual_series_page():
             font=dict(size=12, color="orange"), arrowcolor="orange"
         )
 
+    # ---- NICE threshold overlay ----
     if show_nice and nice_df is not None and not hist_df.empty:
         min_date = hist_df["quarter"].min()
         max_date = hist_df["quarter"].max() if fore_df_display.empty else fore_df_display["quarter"].max()
@@ -613,6 +698,7 @@ def individual_series_page():
                     font=dict(size=9, color="#d62728"), textangle=-45
                 )
 
+    # ---- Axis settings ----
     yaxis_settings = {"title": "Metric Values", "fixedrange": False}
     if zoom_forecast and not fore_df_display.empty and not selected_metric.startswith("GP"):
         range_values = [fore_df_display["value"]]
@@ -642,6 +728,7 @@ def individual_series_page():
     if note:
         st.caption(note)
 
+    # ---- NICE callout for health spend metrics ----
     if "Health spend" in selected_metric and nice_df is not None:
         latest_nice = nice_df[nice_df["category"] == "standard"].sort_values("date").iloc[-1]
         lower_threshold = latest_nice["lower_gbp_per_qaly"]
@@ -658,26 +745,24 @@ def individual_series_page():
                 f"if the entire budget were allocated to cost‑effective interventions."
             )
 
+    # ---- Summary Statistics ----
     st.markdown("---")
     st.subheader("Summary Statistics")
 
     is_pct = is_percentage_metric(selected_metric) if not is_derived else False
 
     col1, col2, col3, col4 = st.columns(4)
-
     with col1:
         if not hist_df.empty:
             range_years = (hist_df["quarter"].max() - hist_df["quarter"].min()).days / 365.25
             st.metric(label="Historical Range", value=f"{range_years:.1f} Years")
         else:
             st.metric(label="Historical Range", value="N/A")
-
     with col2:
         if not fore_df_display.empty and not selected_metric.startswith("GP"):
             st.metric(label="Forecast Horizon", value=f"{len(fore_df_display)} Quarters")
         else:
             st.metric(label="Forecast Horizon", value="0")
-
     with col3:
         if not fore_df_display.empty and not hist_df.empty and not selected_metric.startswith("GP"):
             last_hist = hist_df["value"].iloc[-1]
@@ -690,7 +775,6 @@ def individual_series_page():
                 st.metric(label="Total Forecast Change", value=f"{growth:+.1f}%")
         else:
             st.metric(label="Total Forecast Change", value="N/A")
-
     with col4:
         if not fore_df_display.empty and show_ci and "ci_lower" in fore_df_display.columns and "ci_upper" in fore_df_display.columns:
             ci_width = calculate_ci_width(fore_df_display)
@@ -701,6 +785,7 @@ def individual_series_page():
         else:
             st.metric(label="Avg CI Width", value="N/A")
 
+    # Asymmetric CI bounds at last forecast point
     if not fore_df_display.empty and show_ci and "ci_lower" in fore_df_display.columns:
         last_row = fore_df_display.iloc[-1]
         if last_row["value"] > 0:
@@ -730,6 +815,7 @@ def individual_series_page():
         else:
             st.metric(label="Forecast Quality", value="N/A")
 
+    # ---- Detailed statistics (history, forecast, confidence intervals) ----
     st.markdown("---")
     col1, col2, col3 = st.columns(3)
 
@@ -815,10 +901,15 @@ def individual_series_page():
 
     display_calibration_disclaimer(selected_metric)
 
+
 # ------------------------------------------------------------
 # System Strain Overview Page
 # ------------------------------------------------------------
 def strain_overview_page():
+    """
+    Display the strain summary table as a readable HTML table.
+    This page provides a single‑glance overview of all nine core metrics.
+    """
     st.title("System Strain Overview")
     st.markdown("---")
     try:
@@ -827,6 +918,7 @@ def strain_overview_page():
         st.error(str(e))
         return
 
+    # Column widths for the HTML table
     cols_width = {
         "Metric": "15%",
         "Current trend (last 4 qtrs)": "12%",
@@ -835,6 +927,7 @@ def strain_overview_page():
         "Interpretation": "46%"
     }
 
+    # Build an HTML table with fixed layout (word‑wrap enabled)
     html_table = '<table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.9em;">'
     html_table += "<thead><tr>"
     for col in table_df.columns:
@@ -854,6 +947,7 @@ def strain_overview_page():
 
     st.markdown(html_table, unsafe_allow_html=True)
 
+    # ---- Render footnotes with nested bullets ----
     st.markdown("---")
     st.subheader("Footnotes")
     md_parts = []
@@ -873,6 +967,10 @@ def strain_overview_page():
     footnotes_md = "\n".join(md_parts)
     st.markdown(footnotes_md)
 
+
+# ------------------------------------------------------------
+# Main entry point
+# ------------------------------------------------------------
 def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio("Select Page", ["Individual Series Analysis", "System Strain Overview"])
@@ -880,6 +978,7 @@ def main():
         individual_series_page()
     else:
         strain_overview_page()
+
 
 if __name__ == "__main__":
     main()

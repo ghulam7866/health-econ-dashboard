@@ -3,8 +3,11 @@ test_scraper.py
 ----------------
 Smoke test and automated ingestion layer for all health systems datasets.
 
-This script downloads raw data from NHS, ONS, and HMT sources.
-It enforces strict process exit codes to protect downstream pipelines from partial ingestion.
+This script downloads raw data from NHS, ONS, and HMT sources.  It first
+probes each URL with a HEAD request to check availability, then downloads
+files that are missing or outdated.  If any download fails, the script
+exits with a non‑zero code to prevent downstream pipeline steps from
+running on incomplete data.
 
 Usage:
     python test_scraper.py
@@ -22,6 +25,7 @@ from pathlib import Path
 RAW_DIR = Path(r"C:\Users\44782\Desktop\empirical project\data\raw")
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
+# Standard HTTP headers to avoid being blocked by data providers
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -33,6 +37,8 @@ HEADERS = {
     "Referer": "https://www.england.nhs.uk/",
 }
 
+# Each entry is (display_name, url, optional_filename_override).
+# If the override is None, the filename is derived from the URL.
 DIRECT_URLS = [
     (
         "RTT Waiting Times",
@@ -45,7 +51,7 @@ DIRECT_URLS = [
         "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/06/Monthly-AE-Time-Series-May-2026-wlgnE2.xls",
         None,
     ),
-    # Add the new June 2026 monthly CSV for appending
+    # Add the new June 2026 monthly CSV for appending (see append_ae_june.py)
     (
         "A&E June 2026 monthly",
         "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/07/June-2026-CSV-Wfg38l.csv",
@@ -126,7 +132,7 @@ def step1_probe():
     Returns
     -------
     dict
-        Results of the probe for each target
+        Mapping from dataset name to True/False/"CACHED"
     """
     print("\n-- STEP 1: HEAD Probe Network Targets --")
     results = {}
@@ -135,6 +141,7 @@ def step1_probe():
         fname = fname_override or Path(url.split("?")[0]).name
         dest = RAW_DIR / fname
 
+        # If the file already exists locally, skip network verification
         if dest.exists() and dest.stat().st_size > 0:
             print(f"   [CACHED] {name} found locally. Network verification skipped.")
             results[name] = "CACHED"
@@ -168,7 +175,7 @@ def step2_download(probe_results):
     Returns
     -------
     dict
-        Paths to downloaded files or None for failures
+        Mapping from dataset name to Path of downloaded file (or None)
     """
     print("\n-- STEP 2: Downstream Asset Sync --")
     downloaded = {}
@@ -192,6 +199,7 @@ def step2_download(probe_results):
             with requests.get(url, headers=HEADERS, stream=True, timeout=60) as r:
                 r.raise_for_status()
                 ct = r.headers.get("Content-Type", "")
+                # Reject HTML payloads – often indicate a redirect to a login or error page
                 if "text/html" in ct:
                     print(f"      [ERROR] Ingestion Error: Target returned HTML payload instead of structured file.")
                     downloaded[name] = None

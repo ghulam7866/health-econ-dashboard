@@ -5,8 +5,28 @@ One‑off script: append June 2026 monthly A&E total to the existing
 Monthly A&E Time Series Excel file, producing a new cumulative file
 that the cleaner can ingest without modification.
 
+Background:
+    NHS England publishes a cumulative A&E time series each month.
+    In July 2026 the June 2026 cumulative file was not yet available,
+    only a single‑month CSV.  This script reads the existing cumulative
+    file (up to May 2026), extracts the England total attendances for
+    June 2026 from the separate CSV, appends a new row, and writes a
+    new cumulative Excel file that the cleaner can ingest without
+    any code changes.
+
+Why we need this:
+    The cleaner (`src/cleaner.py`) looks for the newest file matching
+    "*Monthly-AE*" in data/raw/.  By writing the merged file with an
+    appropriate name and placing it in the same directory, the cleaner
+    will automatically pick it up.  This avoids having to modify the
+    cleaner's source every month.
+
 Usage:
     python append_ae_june.py
+
+    Before running, ensure that:
+      - Monthly-AE-Time-Series-May-2026-wlgnE2.xls is in data/raw/
+      - AE_June_2026.csv (downloaded by test_scraper.py) is in data/raw/
 """
 
 import pandas as pd
@@ -22,11 +42,14 @@ OUTPUT = RAW_DIR / "Monthly-AE-Time-Series-June-2026-merged.xlsx"
 # ---- 1. Load old time series (sheet "Activity", header at row 13) ----
 df_old = pd.read_excel(OLD_TS, sheet_name="Activity", header=13)
 
-# Rename the date column (index 1) to 'period'
+# The date column is index 1 (col B). Rename it for clarity.
 df_old = df_old.rename(columns={df_old.columns[1]: "period"})
 df_old["period"] = pd.to_datetime(df_old["period"], errors="coerce")
 
 # ---- 2. Find the total attendances column (robust search) ----
+# After the cleaner's normalisation it becomes "total_attendances".
+# The raw Excel header may be "Total attendances" (capital T, space).
+# We'll search for any column whose lowercased name contains both "total" and "attendances".
 target_col = None
 for col in df_old.columns:
     col_str = str(col).strip().lower()
@@ -35,6 +58,7 @@ for col in df_old.columns:
         break
 
 if target_col is None:
+    # If still not found, print all columns for manual inspection
     print("Available columns:")
     for i, col in enumerate(df_old.columns):
         print(f"  [{i}] {col}")
@@ -51,6 +75,7 @@ total_row = df_june[df_june["Org Code"].str.strip() == "Total"]
 if total_row.empty:
     raise ValueError("No 'Total' row found in the June CSV")
 
+# Sum the three attendance columns to get the national total for the month.
 attend_cols = [
     "A&E attendances Type 1",
     "A&E attendances Type 2",
@@ -61,7 +86,7 @@ june_total = total_row[attend_cols].sum(axis=1).iloc[0]
 # ---- 4. Create new row with the exact same columns as df_old ----
 new_row = {col: pd.NA for col in df_old.columns}
 new_row["period"] = pd.Timestamp("2026-06-01")
-new_row[target_col] = june_total
+new_row[target_col] = june_total   # put the value into the correct column
 
 # ---- 5. Append and save as .xlsx, writing header at row 13 (0‑indexed) ----
 new_df = pd.DataFrame([new_row])

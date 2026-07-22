@@ -1,9 +1,32 @@
 """
-stress_test.py  –  production‑ready (2026-07-10)
-- Log-transform applies to RTT waiting list, Doctor FTE, and Nurse FTE
-- t‑based CI with configurable df floor and sigma_scale
-- GARCH code present but inactive
-- Fixed missing rmse in compact summary
+stress_test.py  –  production‑ready (2026‑07‑10)
+--------------------------------------------------
+Rolling‑origin backtest engine for individual NHS performance metrics.
+
+This script loads the combined quarterly dataset, generates a set of
+candidate SARIMAX specifications (including the locked production config,
+various alternative ARIMA orders, exog‑isolation tests, and baselines),
+and evaluates each candidate through a rolling‑origin expanding‑window
+backtest.  It reports RMSE, MAE, bias, directional accuracy, and 95 %
+confidence interval coverage at multiple forecast horizons, and runs a
+five‑step diagnostic sequence on the production model.
+
+Key design choices:
+- Log‑transform is applied to RTT waiting list, Doctor FTE, and Nurse FTE
+  (specified in exog_config.MODEL_CONFIG).
+- t‑based prediction intervals with a configurable df floor and sigma_scale
+  multiplier (1.0–1.8×) are used to widen Gaussian CIs and improve coverage.
+- GARCH code is present but inactive (cfg.get("garch") is not set for any series).
+- The backtest respects FIT_START_OVERRIDES (e.g., A&E 12h breach restricted
+  to 2021‑01‑01 onward).
+- Results are saved to reports/backtest_*_log_*.txt and summary CSVs.
+
+Usage:
+    python stress_test.py "Bed occupancy (level)"
+    python stress_test.py --all
+    python stress_test.py --all --fast       # only horizons 4 & 8
+
+Last updated: 2026‑07‑10
 """
 
 import sys, os, itertools, warnings, traceback, argparse
@@ -25,6 +48,7 @@ INPUT_FILE = os.path.join(DATA_DIR, "combined_quarterly.csv")
 sys.path.insert(0, os.path.join(PROJECT_DIR, "src"))
 import exog_config as ec
 
+# Global constants for the backtest
 SEASONAL_PERIOD = 4; DIAGNOSTIC_ALPHA = 0.05; INSTABILITY_MARGIN = 1.05
 DEFAULT_HORIZONS = [1,2,3,4,8,12]; FAST_HORIZONS = [4,8]; DEFAULT_MIN_TRAIN_SIZE = 6
 ORDER_GRID_P = (0,1,2); ORDER_GRID_Q = (0,1,2); ORDER_GRID_D = (0,1)
@@ -34,6 +58,7 @@ BIAS_SUMMARY_LABEL_MATCHES = ["PRODUCTION","ALT","REGRESSION CHECK","BASELINE","
 SKIP_METRICS = {"PESA Health spend (level)","GP total appointments (flow)","GP face-to-face appointments (flow)","GP telephone appointments (flow)"}
 
 class Tee:
+    """Duplicate sys.stdout to a log file while still printing to console."""
     def __init__(self, filepath):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         self.terminal, self.log = sys.stdout, open(filepath,"w",encoding="utf-8")
@@ -41,7 +66,14 @@ class Tee:
     def flush(self): self.terminal.flush(); self.log.flush()
 
 def load_series(metric_key):
+    """
+    Load a single metric from combined_quarterly.csv, construct the
+    exogenous columns used by the backtest (covid_pulse, post_covid_regime,
+    quadratic_trend, post_covid_trend_break), and apply FIT_START_OVERRIDES
+    if configured.
+    """
     df = pd.read_csv(INPUT_FILE); df["quarter"] = pd.to_datetime(df["quarter"])
+    # Build intervention dummies (identical to add_intervention_dummies.py)
     df["covid_pulse"] = ((df["quarter"]>="2020-04-01")&(df["quarter"]<="2021-01-01")).astype(float)
     df["post_covid_regime"] = (df["quarter"]>="2021-04-01").astype(float)
     t = np.arange(len(df)); t_centered = t - t.mean(); quadratic = t_centered**2
@@ -57,6 +89,7 @@ def load_series(metric_key):
     return sub.reset_index(drop=True)
 
 def resolve_horizons_and_min_train(metric_key, sub, fast=False):
+    """Determine which forecast horizons can be tested given the series length."""
     cfg = ec.MODEL_CONFIG[metric_key]
     base = FAST_HORIZONS if fast else DEFAULT_HORIZONS
     max_h = cfg.get("horizons", base[-1]); horizons = [h for h in base if h<=max_h] or [max_h]
@@ -68,6 +101,12 @@ def resolve_horizons_and_min_train(metric_key, sub, fast=False):
     return horizons, mt
 
 def build_candidates(metric_key, fast=False):
+    """
+    Build the list of candidate SARIMAX specifications for a metric.
+    The first candidate is always the locked production spec; additional
+    candidates explore trend flips, exog exclusion, AR/MA simplification,
+    and a white‑noise baseline.
+    """
     cfg = ec.MODEL_CONFIG[metric_key]; mt = cfg.get("model_type","")
     if mt=="ETS_damped_logit": return [("PRODUCTION ETS damped logit",None,None,None,[])]
     order = tuple(cfg["order"]); seasonal = tuple(cfg["seasonal_order"]); trend = cfg["trend"]
@@ -93,6 +132,7 @@ def build_candidates(metric_key, fast=False):
     if (p,q)!=(0,1): cand.append((f"ALT: MA(1) only ({0},{d},{1})", (0,d,1), seasonal, trend, list(exog_cols)))
     if (p,q)!=(1,1): cand.append((f"ALT: ARMA(1,1) ({1},{d},{1})", (1,d,1), seasonal, trend, list(exog_cols)))
     cand.append((f"BASELINE: white noise (0,{d},0)", (0,d,0), (0,0,0,s), trend, []))
+    # Deduplicate by (order, seasonal_order, trend, exog_cols)
     seen=set(); dedup=[]
     for c in cand:
         key=(c[1],c[2],c[3],tuple(c[4]))
@@ -101,6 +141,7 @@ def build_candidates(metric_key, fast=False):
 
 # ----- Diagnostics (unchanged) -----
 def diagnostic_significance(y,exog,cols):
+    """1/5 – OLS significance screen for exogenous variables."""
     print("\n--- [1/5] Significance screen (OLS) ---")
     if not cols: print("  No exog columns – skipping."); return
     X=sm.add_constant(exog); model=sm.OLS(y,X).fit()
@@ -109,6 +150,7 @@ def diagnostic_significance(y,exog,cols):
         print(f"  {name:<25} coef={coef:>14.4f}  p={pval:.4f}  [{flag}]")
 
 def diagnostic_quadratic_trend(y):
+    """2/5 – Quadratic trend significance check."""
     print("\n--- [2/5] Quadratic trend check ---")
     t=np.arange(len(y),dtype=float); X=sm.add_constant(np.column_stack([t,t**2]))
     model=sm.OLS(y,X).fit(); coef_t2,pval_t2=model.params[2],model.pvalues[2]
@@ -116,6 +158,7 @@ def diagnostic_quadratic_trend(y):
     print(f"  t^2 coef={coef_t2:.6f}  p={pval_t2:.4f}  [{flag}]")
 
 def diagnostic_stationarity(y):
+    """3/5 – ADF and KPSS stationarity tests on levels, 1st diff, and seasonal diff."""
     print("\n--- [3/5] Stationarity checks ---")
     def _run(label,series):
         if len(series)<10: print(f"  {label:<20} (too few observations – skipped)"); return
@@ -128,6 +171,7 @@ def diagnostic_stationarity(y):
     if len(y)>SEASONAL_PERIOD: _run(f"seasonal diff ({SEASONAL_PERIOD})",y[SEASONAL_PERIOD:]-y[:-SEASONAL_PERIOD])
 
 def diagnostic_order_selection(y,exog):
+    """4/5 – AICc grid search over candidate ARIMA orders (144 combinations)."""
     print("\n--- [4/5] Order selection (AICc grid) ---")
     scale=np.nanmax(np.abs(y)); y_scaled=y/scale
     combos=itertools.product(ORDER_GRID_P,ORDER_GRID_D,ORDER_GRID_Q,
@@ -148,6 +192,7 @@ def diagnostic_order_selection(y,exog):
     if not scored: print("  No grid combination converged.")
 
 def diagnostic_instability(sub,candidates):
+    """5/5 – Check for near‑unit‑root AR or near‑non‑invertible MA roots."""
     print("\n--- [5/5] Instability check ---")
     y_full=sub["value"].values.astype(float); scale=np.nanmax(np.abs(y_full)); y_scaled=y_full/scale
     for label,order,seasonal_order,trend,exog_cols in candidates:
@@ -166,6 +211,7 @@ def diagnostic_instability(sub,candidates):
         print(f"  {label:<55} [{'; '.join(flags) if flags else 'OK'}]")
 
 def run_diagnostic_sequence(sub,cand,dxcols):
+    """Execute the five‑step diagnostic sequence for the production model."""
     print("\n"+"="*90); print("DIAGNOSTIC SEQUENCE"); print("="*90)
     y_full=sub["value"].values.astype(float)
     exog_full=sub[list(dxcols)].values.astype(float) if dxcols else None
@@ -177,11 +223,13 @@ def run_diagnostic_sequence(sub,cand,dxcols):
 # ----- Fit & forecast -----
 def fit_and_forecast_sarimax(y_scaled, exog, order, seasonal_order, trend, horizon,
                              initialization='approximate_diffuse'):
+    """Fit a single SARIMAX model and return the h‑step ahead point forecast and CI bounds."""
     model = sm.tsa.statespace.SARIMAX(
         y_scaled, exog=exog, order=order, seasonal_order=seasonal_order,
         trend=trend, enforce_stationarity=True, enforce_invertibility=True,
         initialization=initialization)
     res = model.fit(disp=False, method='lbfgs', maxiter=2000)
+    # Extrapolate exogenous variables using last‑difference
     if exog is not None:
         last_val = exog[-1,:]; last_diff = exog[-1,:]-exog[-2,:]
         steps = np.arange(1,horizon+1).reshape(-1,1); future_exog = last_val + steps*last_diff
@@ -192,6 +240,7 @@ def fit_and_forecast_sarimax(y_scaled, exog, order, seasonal_order, trend, horiz
     return mean[-1], ci[-1,0], ci[-1,1]
 
 def fit_and_forecast_ets(series_prob, horizon):
+    """Fit a damped‑trend ETS model on the logit scale for RTT % (if ever used)."""
     eps=1e-6; yc=np.clip(series_prob,eps,1-eps); yl=np.log(yc/(1-yc))
     fit = ExponentialSmoothing(yl, trend='add', damped_trend=True, seasonal=None).fit()
     fc_logit = fit.forecast(steps=horizon); fc_prob = 1/(1+np.exp(-fc_logit))
@@ -201,6 +250,11 @@ def fit_and_forecast_ets(series_prob, horizon):
 
 # ----- t-distribution df estimator -----
 def estimate_t_df_from_full_fit(sub, metric_key, cfg):
+    """
+    Fit the production model on the full history and estimate the degrees
+    of freedom of a t‑distribution from the standardised residuals.
+    Used for t‑based prediction intervals.
+    """
     y_raw = sub["value"].values.astype(float)
     exog_cols = list(ec.EXOG_CONFIG.get(metric_key,[]))
     apply_log = False
@@ -236,7 +290,7 @@ def estimate_t_df_from_full_fit(sub, metric_key, cfg):
 
 # ----- GARCH multiplier function -----
 def fit_garch_on_residuals(resid, horizon):
-    """Fit GARCH(1,1) on standardized residuals and return per‑horizon variance multipliers."""
+    """Fit GARCH(1,1) on standardised residuals and return per‑horizon variance multipliers."""
     try:
         std_resid = (resid - np.mean(resid)) / np.std(resid, ddof=1)
         garch = arch_model(std_resid, vol='Garch', p=1, q=1, mean='Zero', dist='normal')
@@ -251,6 +305,11 @@ def fit_garch_on_residuals(resid, horizon):
 
 # ----- Backtest -----
 def run_backtest(sub, candidates, horizons, min_train_size, metric_key):
+    """
+    Rolling‑origin expanding‑window backtest.
+    For each candidate and each horizon, it forecasts from every feasible
+    origin and collects the forecast vs. actual, then computes metrics.
+    """
     y_raw = sub["value"].values.astype(float); n=len(y_raw)
     cfg = ec.MODEL_CONFIG.get(metric_key,{}); mt = cfg.get("model_type","")
     sigma_scale = cfg.get("sigma_scale",1.0)
@@ -363,6 +422,7 @@ def run_backtest(sub, candidates, horizons, min_train_size, metric_key):
     return results
 
 def compute_metrics(rows):
+    """Compute RMSE, MAE, bias, directional accuracy, and CI coverage from a list of forecast vs. actual pairs."""
     if not rows: return None
     f=np.array([r["forecast"] for r in rows]); a=np.array([r["actual"] for r in rows])
     lo=np.array([r["ci_lo"] for r in rows]); hi=np.array([r["ci_hi"] for r in rows])
@@ -374,6 +434,7 @@ def compute_metrics(rows):
     return {"n":len(rows),"rmse":rmse,"mae":mae,"bias":bias,"dir_acc":da,"ci_coverage":cov}
 
 def score_results(results, horizons, candidates):
+    """Print the backtest results table."""
     print("\n"+"="*90); print("BACKTEST RESULTS"); print("="*90)
     for h in horizons:
         print(f"\n--- Horizon = {h} quarter(s) ---")
@@ -387,6 +448,7 @@ def score_results(results, horizons, candidates):
     print("CICov  = fraction inside 95% CI (target ~0.95).")
 
 def report_trend_comparison(results, candidates):
+    """Compare trend='c' vs trend='n' candidates where they differ."""
     cands = [c for c in candidates if c[1] is not None]
     if len(cands)<2: return
     pairs=[]
@@ -412,6 +474,7 @@ def report_trend_comparison(results, candidates):
         break
 
 def print_bias_summary(results, candidates):
+    """Print a compact bias summary at the longest horizons."""
     matched = [label for label,*_ in candidates if any(m in label for m in BIAS_SUMMARY_LABEL_MATCHES)]
     if not matched: return
     hp = sorted({h for label in matched for h in results[label].keys()}); bh = hp[-2:] if len(hp)>=2 else hp
@@ -431,6 +494,7 @@ def print_bias_summary(results, candidates):
         print(row)
 
 def residual_diagnostics(sub, metric_key):
+    """Run Ljung‑Box, Jarque‑Bera, and ARCH‑LM tests on the full‑history production fit residuals."""
     print("\n"+"="*90); print("RESIDUAL DIAGNOSTICS (production spec, full-history fit)"); print("="*90)
     cfg=ec.MODEL_CONFIG[metric_key]; exog_cols=list(ec.EXOG_CONFIG.get(metric_key,[])); mt=cfg.get("model_type","")
     y_raw=sub["value"].values.astype(float)
@@ -496,6 +560,7 @@ def residual_diagnostics(sub, metric_key):
     return verdict
 
 def process_metric(metric_key, fast=False):
+    """Run the full backtest and diagnostics for a single metric."""
     print("\n\n"+"#"*90); print(f"# METRIC: {metric_key}"); print(f"# Series: {ec.METRIC_NAMES[metric_key]}"); print("#"*90)
     sub=load_series(metric_key); print(f"Loaded {len(sub)} obs, {sub['quarter'].iloc[0].date()} to {sub['quarter'].iloc[-1].date()}")
     horizons,mt=resolve_horizons_and_min_train(metric_key,sub,fast); cand=build_candidates(metric_key,fast)
@@ -518,6 +583,7 @@ def process_metric(metric_key, fast=False):
     return summary,res,cand,horizons
 
 def main():
+    """Parse arguments and dispatch backtests."""
     parser=argparse.ArgumentParser(); parser.add_argument("metric",nargs="?",default=None); parser.add_argument("--list",action="store_true")
     parser.add_argument("--all",action="store_true"); parser.add_argument("--fast",action="store_true")
     args=parser.parse_args()
